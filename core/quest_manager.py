@@ -2,14 +2,11 @@
 
 import random
 from quest_system import QUESTS
-from crazy_style import (
+from ui_core import (
     RESET, BOLD, DIM, BRIGHT_WHITE, BRIGHT_CYAN, BRIGHT_YELLOW,
     BRIGHT_GREEN, BRIGHT_RED, BRIGHT_MAGENTA,
-    crazy_input, crazy_int_input, clear_screen
+    crazy_input, crazy_int_input, clear_screen, fancy_header
 )
-from animations import fancy_header
-from animations import fancy_header
-from animations import fancy_header
 
 DIFFICULTY_COLORS = {"easy": BRIGHT_GREEN, "medium": BRIGHT_YELLOW, "hard": BRIGHT_RED, "expert": BRIGHT_MAGENTA}
 

@@ -3,7 +3,7 @@ import os
 def generate():
     with open("massive_ui_components.py", "w") as f:
         f.write('"""\nMassive collection of UI components, palettes, and frames.\n"""\n\n')
-        f.write("from crazy_style import *\n")
+        f.write("from ui_core import *\n")
         f.write("import time\nimport sys\n\n")
         
         # Generate 1000 color palettes

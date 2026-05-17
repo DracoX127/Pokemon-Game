@@ -4,54 +4,13 @@ from evolution_map import EVOLUTION_MAP
 from abilities import get_ability_for_pokemon, pick_ability_by_type, apply_ability_trigger
 from held_items import apply_held_item_trigger, HELD_ITEMS
 from time_system import advance_time, time_spawn_modifier, get_time_spawns
-from crazy_style import (
-    RESET, BOLD, DIM, ITALIC, UNDERLINE, REVERSE,
-    RED, GREEN, YELLOW, BLUE, MAGENTA, CYAN, WHITE,
-    BRIGHT_RED, BRIGHT_GREEN, BRIGHT_YELLOW, BRIGHT_BLUE,
-    BRIGHT_MAGENTA, BRIGHT_CYAN, BRIGHT_WHITE,
-    BG_RED, BG_GREEN, BG_YELLOW,
-    rgb, bg_rgb,
-    rainbow_text, fire_text, electric_text, gradient_text, crazy_text,
-    glitch_text, sparkle_text, neon_glow, psychic_text, random_color_text,
-    crazy_box, fire_box, electric_box, hp_bar, xp_bar,
-    crazy_divider, menu_divider,
-    typewriter, dramatic_print, explode_print, dramatic_pause, slow_reveal,
-    stat_label, money_display, trophy_display,
-    pokemon_name_style, enemy_name_style, player_name_style,
-    print_art, LEVEL_UP_ART, WIN_ART, LOSE_ART, CATCH_ART, CRIT_ART,
-    BATTLE_ART, SHOP_ART, HOSPITAL_ART,
-    crazy_input, crazy_int_input,
-    ALL_COLORS, FIRE_COLORS
-)
-from animations import (
-    pokeball_loading, progress_bar_animated, spinner_animation, battle_loading,
-    matrix_text_reveal, explosion_effect, sparkle_burst, damage_shake,
-    rain_effect, fire_effect, electric_storm,
-    wipe_transition, fade_transition, pokeball_transition,
-    animate_attack_sequence, animate_enemy_attack_sequence, animate_catch_attempt, animate_heal, animate_level_up,
-    animate_money_earned, dna_evolution_sequence,
-    stat_card, battle_hud, shop_item_card, fancy_header,
-    countdown, victory_celebration, defeat_rain,
-    ability_activation, item_flash, type_effectiveness_flash,
-    recoil_flash, healing_flash, stage_change_flash
-)
-from battle_log import battle_log
+from ui_core import *
 from quest_manager import quest_manager
 from world_map import REGIONS
 from moves_data import MOVES, get_effectiveness
 from inventory import ITEMS, apply_item_effect
 from status_manager import STATUS_EFFECTS, apply_status_tick, can_attack
 from weather_engine import WEATHER_EFFECTS, apply_weather_damage
-from ascii_art import (
-    get_pokemon_sprite, POKEMON_SPRITES,
-    WILD_ENCOUNTER_ART, ARENA_ENTRANCE_ART, SHOP_ENTRANCE_ART,
-    HOSPITAL_ENTRANCE_ART, VICTORY_ROYALE_ART, DEFEAT_ART,
-    CAUGHT_POKEMON_ART, MEGA_CRIT_ART, LEVEL_UP_MEGA_ART,
-    TRAINING_ART, HEALING_FRAMES, STARTER_SELECTION_ART,
-    MONEY_EARNED_ART, TROPHY_ART,
-    POKEBALL_THROW_FRAMES, POKEBALL_FAIL_FRAMES,
-    ATTACK_FRAMES, ENEMY_ATTACK_FRAMES
-)
 import time
 import sys
 
@@ -108,7 +67,30 @@ def get_arena_pokemon(level):
 
 def calculate_move_damage(move_name, attacker_stats, defender_type, weather="Clear", is_crit=False):
     """Calculate damage based on move power, category, type effectiveness, status, and weather."""
-    move = MOVES.get(move_name, {"type": "Normal", "power": 40, "category": "Physical"})
+    # Dynamic Z-Move or G-Max move interceptor
+    if move_name.startswith("🌟 "):
+        actual_name = move_name[2:]
+        move = {"type": "Normal", "power": 220, "category": "Special"}
+        z_types = {
+            "Inferno Overdrive": "Fire",
+            "Gigavolt Havoc": "Electric",
+            "Hydro Vortex": "Water",
+            "Bloom Doom": "Grass",
+            "Breakneck Blitz": "Normal",
+            "10,000,000 Volt Thunderbolt": "Electric"
+        }
+        move["type"] = z_types.get(actual_name, "Normal")
+    elif move_name.startswith("👹 "):
+        actual_name = move_name[8:] if move_name.startswith("👹 G-Max ") else move_name[2:]
+        base_move = MOVES.get(actual_name, {"type": "Normal", "power": 40, "category": "Physical"})
+        move = {
+            "type": base_move.get("type", "Normal"),
+            "power": int(base_move.get("power", 40) * 1.8),
+            "category": base_move.get("category", "Physical")
+        }
+    else:
+        move = MOVES.get(move_name, {"type": "Normal", "power": 40, "category": "Physical"})
+        
     effectiveness = get_effectiveness(move["type"], defender_type)
     
     atk_mult = 1.0
@@ -387,35 +369,156 @@ def level_up_pokemon(pokemon_dict, poke_name):
     return current_name
 
 
-def select_move_menu(pokemon_name, stats):
-    """Interactive menu to select a move showing PP and priority."""
+def select_move_menu(pokemon_name, stats, inventory=None, battle_state=None):
+    """Interactive menu to select a move showing PP and priority, with Mega/Z-Moves/Gigantamax options."""
+    if "stages" not in stats:
+        stats["stages"] = {"dm": 0, "speed": 0}
+        
     moves = stats.get("moves", ["Tackle"])
-    fancy_header(f"{pokemon_name.upper()}'S MOVES", emoji="⚔️", width=40)
-    
     pp_data = stats.get("pp", {})
-
-    for i, move_name in enumerate(moves):
-        move = MOVES.get(move_name, {"type": "Normal", "power": 40, "category": "Physical", "priority": 0})
-        move_color = YELLOW
-        type_colors = {
-            "Fire": RED, "Water": BLUE, "Grass": GREEN, "Electric": BRIGHT_YELLOW,
-            "Psychic": MAGENTA, "Ice": BRIGHT_CYAN, "Fighting": BRIGHT_RED,
-            "Ghost": BRIGHT_MAGENTA, "Dragon": BRIGHT_BLUE, "Steel": WHITE
-        }
-        move_color = type_colors.get(move["type"], YELLOW)
-
-        current_pp = pp_data.get(move_name, get_max_pp(move_name))
-        max_pp = get_max_pp(move_name)
-        priority_mark = f" {BOLD}{BRIGHT_YELLOW}★Priority{RESET}" if move.get("priority", 0) != 0 else ""
-
-        print(f"  {BOLD}{BRIGHT_WHITE}{i+1}.{RESET} {move_color}{move_name:15}{RESET} [{move['type']}/{move['category']}/{move['power']}]  PP: {current_pp}/{max_pp}{priority_mark}")
     
-    print(f"  {BOLD}{BRIGHT_WHITE}{len(moves)+1}.{RESET} {RED}Back{RESET}")
+    has_mega_option = False
+    has_z_option = False
+    has_g_option = False
     
-    choice = crazy_int_input("Select a move")
-    if 1 <= choice <= len(moves):
-        return moves[choice-1]
-    return None
+    hold_item = stats.get("hold_item")
+    from held_items import HELD_ITEMS
+    item_info = HELD_ITEMS.get(hold_item, {}) if hold_item else {}
+    
+    # Mega Evolution checks
+    if battle_state and not battle_state.get("mega_evolved"):
+        if item_info.get("trigger") == "mega_stone":
+            target = item_info.get("target", "")
+            if target.lower() in pokemon_name.lower():
+                has_mega_option = True
+
+    # Z-Crystal checks
+    if battle_state and not battle_state.get("z_move_used") and not battle_state.get("z_power_active"):
+        if item_info.get("trigger") == "z_crystal":
+            z_type = item_info.get("type", "")
+            z_target = item_info.get("target", "")
+            if (z_target and z_target.lower() in pokemon_name.lower()) or (z_type and any(MOVES.get(m, {}).get("type") == z_type for m in moves)):
+                has_z_option = True
+
+    # Gigantamax checks
+    if battle_state and not battle_state.get("gigantamax_active") and battle_state.get("gigantamax_turns", 0) == 0:
+        has_g_option = True
+
+    while True:
+        fancy_header(f"{pokemon_name.upper()}'S MOVES", emoji="⚔️", width=40)
+        
+        display_moves = list(moves)
+        z_power_active = battle_state.get("z_power_active", False) if battle_state else False
+        gigantamax_active = battle_state.get("gigantamax_active", False) if battle_state else False
+        
+        for i, move_name in enumerate(display_moves):
+            move = MOVES.get(move_name, {"type": "Normal", "power": 40, "category": "Physical", "priority": 0})
+            
+            mod_name = move_name
+            mod_power = move.get("power", 40)
+            
+            if z_power_active:
+                z_move_name = item_info.get("z_move", "Breakneck Blitz")
+                z_type = item_info.get("type", "")
+                z_target = item_info.get("target", "")
+                if (z_target and z_target.lower() in pokemon_name.lower()) or (z_type and move.get("type") == z_type):
+                    mod_name = f"🌟 {z_move_name}"
+                    mod_power = 220
+            elif gigantamax_active:
+                mod_name = f"👹 G-Max {move_name}"
+                mod_power = int(mod_power * 1.8)
+                
+            move_color = YELLOW
+            type_colors = {
+                "Fire": RED, "Water": BLUE, "Grass": GREEN, "Electric": BRIGHT_YELLOW,
+                "Psychic": MAGENTA, "Ice": BRIGHT_CYAN, "Fighting": BRIGHT_RED,
+                "Ghost": BRIGHT_MAGENTA, "Dragon": BRIGHT_BLUE, "Steel": WHITE
+            }
+            move_color = type_colors.get(move["type"], YELLOW)
+
+            current_pp = pp_data.get(move_name, get_max_pp(move_name))
+            max_pp = get_max_pp(move_name)
+            priority_mark = f" {BOLD}{BRIGHT_YELLOW}★Priority{RESET}" if move.get("priority", 0) != 0 else ""
+
+            print(f"  {BOLD}{BRIGHT_WHITE}{i+1}.{RESET} {move_color}{mod_name:20}{RESET} [{move['type']}/{move['category']}/{mod_power}]  PP: {current_pp}/{max_pp}{priority_mark}")
+        
+        print()
+        if has_mega_option:
+            print(f"  {BOLD}{BRIGHT_MAGENTA}[M] Trigger Mega Evolution!{RESET}")
+        if has_z_option:
+            print(f"  {BOLD}{BRIGHT_YELLOW}[Z] Activate Z-Power!{RESET}")
+        if has_g_option:
+            print(f"  {BOLD}{BRIGHT_RED}[G] Gigantamax!{RESET}")
+            
+        print(f"  {BOLD}{BRIGHT_WHITE}{len(moves)+1}.{RESET} {RED}Back{RESET}")
+        print()
+        
+        choice_str = crazy_input("Select a move or action").strip().lower()
+        
+        if choice_str == "m" and has_mega_option:
+            from ui_core import mega_evolution_animation
+            mega_form = item_info.get("mega_form", f"Mega {pokemon_name}")
+            mega_evolution_animation(pokemon_name, mega_form)
+            
+            stats["maxhp"] = int(stats["maxhp"] * 1.3)
+            stats["hp"] = int(stats["hp"] * 1.3)
+            stats["dm"] = int(stats["dm"] * 1.4)
+            stats["speed"] = int(stats["speed"] * 1.3)
+            stats["hold_item"] = None
+            
+            mega_abilities = {
+                "mega charizard x": "Tough Claws",
+                "mega charizard y": "Drought",
+                "mega venusaur": "Thick Fat",
+                "mega blastoise": "Mega Launcher",
+                "mega mewtwo y": "Insomnia",
+                "mega gengar": "Shadow Tag",
+                "mega alakazam": "Trace"
+            }
+            stats["ability"] = mega_abilities.get(mega_form.lower(), "Pressure")
+            
+            pokemon_name = mega_form
+            if "name" in stats:
+                stats["name"] = mega_form
+                
+            battle_state["mega_evolved"] = True
+            has_mega_option = False
+            continue
+            
+        elif choice_str == "z" and has_z_option:
+            from ui_core import z_move_animation
+            z_move_name = item_info.get("z_move", "Breakneck Blitz")
+            z_move_animation(pokemon_name, z_move_name, hold_item)
+            
+            battle_state["z_power_active"] = True
+            has_z_option = False
+            continue
+            
+        elif choice_str == "g" and has_g_option:
+            from ui_core import gigantamax_animation
+            gigantamax_animation(pokemon_name)
+            
+            stats["maxhp"] *= 2
+            stats["hp"] *= 2
+            
+            battle_state["gigantamax_active"] = True
+            battle_state["gigantamax_turns"] = 3
+            has_g_option = False
+            continue
+            
+        try:
+            choice = int(choice_str)
+        except ValueError:
+            choice = 0
+            
+        if 1 <= choice <= len(display_moves):
+            chosen_move = display_moves[choice-1]
+            if z_power_active:
+                battle_state["z_power_active"] = False
+                battle_state["z_move_used"] = True
+            return chosen_move
+        elif choice == len(display_moves) + 1:
+            return None
 
 
 def use_item_menu(inventory, pokemon_stats, pokemon_dict=None, current_name=None):
@@ -897,37 +1000,157 @@ def apply_item_after_attack(attacker, defender, damage_dealt):
     return messages
 
 # ============================================================
-# Enemy AI
+# Enemy AI & Dialogue Personas (Legacy + New AI Engine)
 # ============================================================
 
-def choose_enemy_action(enemy_stats, ally_stats, enemy_team_available):
+from ai_engine import (
+    tactical_ai_decide, get_trash_talk, get_persona_emoji, get_persona_description,
+    AI_PERSONAS, TRASH_TALK
+)
+
+PERSONA_DIALOGUES = {
+    "Hyper-Offense": {
+        "start": "All-out power is the only way to victory! Prepare to be crushed!",
+        "low_hp": "Grr... it doesn't matter! My next hit will obliterate you!",
+        "defeat": "Impossible! My overwhelming power failed...?!",
+        "crit": "Direct hit! Taste the power of pure devastation!"
+    },
+    "Defensive": {
+        "start": "A perfect shield cannot be broken. Your attacks are futile.",
+        "low_hp": "Fascinating... but my defensive layers are already adapting.",
+        "defeat": "A calculated defeat... but your offense was highly impressive.",
+        "crit": "A precise and steady strike."
+    },
+    "Trickster": {
+        "start": "Let's play a game of shadows and status! Hehehe...",
+        "low_hp": "Oops! Time to slip away and reset the board!",
+        "defeat": "Aww, you ruined my fun... next time you won't be so lucky!",
+        "crit": "Bullseye! Did that sting? Hehehe!"
+    },
+    "Tactical": {
+        "start": "Analyzing team compositions... I have mapped out the route to your defeat.",
+        "low_hp": "Fascinating tactic. Initiating contingency protocol.",
+        "defeat": "Excellent battle. Your strategic decisions were superior.",
+        "crit": "Critical calculation confirmed."
+    }
+}
+
+def log_persona_dialogue(persona, event, trainer_name="Enemy"):
+    # Try new AI engine first
+    if persona in TRASH_TALK:
+        phrase = get_trash_talk(persona, event)
+        emoji = get_persona_emoji(persona)
+    else:
+        dialogues = PERSONA_DIALOGUES.get(persona, PERSONA_DIALOGUES["Tactical"])
+        phrase = dialogues.get(event, "...")
+        emoji = "💬"
+    from ui_core import BOLD, BRIGHT_RED, BRIGHT_MAGENTA, RESET
+    battle_log.log(f"{emoji} {BOLD}{BRIGHT_RED}{trainer_name}: \"{phrase}\"{RESET}", BRIGHT_MAGENTA)
+
+def choose_enemy_action(enemy_stats, ally_stats, enemy_team_available, ai_persona="Tactical", weather="Clear", turn_count=0, enemy_team_dict=None):
+    """Wrapper that delegates to the new AI engine with fallback to legacy logic."""
+    if ai_persona in AI_PERSONAS:
+        current_name = enemy_stats.get("name", "")
+        team_dict = enemy_team_dict or {}
+        for n in (enemy_team_available or []):
+            if n not in team_dict:
+                team_dict[n] = {"hp": 100, "maxhp": 100}
+        action_type, action_target = tactical_ai_decide(
+            enemy_stats, ally_stats, team_dict, current_name,
+            ai_persona=ai_persona, weather=weather, turn_count=turn_count
+        )
+        if action_type == "switch" and action_target not in enemy_team_available:
+            action_type, action_target = ("attack", random.choice(enemy_stats.get("moves", ["Tackle"])))
+        return (action_type, action_target)
+
+    # Legacy fallback for personas not in new engine
     moves = enemy_stats.get("moves", ["Tackle"])
     move_data = []
-    status_move = None
     for m in moves:
         data = MOVES.get(m, {"type": "Normal", "power": 40, "category": "Physical", "effect": None})
-        eff = get_effectiveness(data["type"], ally_stats.get("type", "Normal"))
-        is_status = data.get("category") == "Status" and data.get("effect", {}).get("status")
-        move_data.append((m, data, eff, is_status))
-        if is_status:
-            status_move = m
+        power = data.get("power", 0)
+        m_type = data.get("type", "Normal")
+        eff = get_effectiveness(m_type, ally_stats.get("type", "Normal"))
+        effect = data.get("effect", {})
+        status_to_inflict = None
+        heal_ratio = 0
+        stat_changes = {}
+        if effect and isinstance(effect, dict):
+            status_to_inflict = effect.get("status")
+            heal_ratio = effect.get("heal", 0)
+            stat_changes = effect.get("stages", {})
+        move_data.append({
+            "name": m, "data": data, "power": power, "type": m_type,
+            "eff": eff, "expected_damage": power * eff,
+            "status_to_inflict": status_to_inflict, "heal_ratio": heal_ratio, "stat_changes": stat_changes
+        })
 
-    if enemy_stats.get("hp", 0) < enemy_stats.get("maxhp", 1) * 0.25 and enemy_team_available:
-        if random.random() < 0.4:
+    hp_ratio = enemy_stats.get("hp", 0) / enemy_stats.get("maxhp", 1)
+
+    if ai_persona == "Hyper-Offense":
+        damage_moves = [m for m in move_data if m["power"] > 0]
+        if damage_moves:
+            return ("attack", max(damage_moves, key=lambda x: x["expected_damage"])["name"])
+        return ("attack", random.choice(moves))
+
+    elif ai_persona == "Defensive":
+        if hp_ratio < 0.60:
+            heal_moves = [m for m in move_data if m["heal_ratio"] > 0]
+            if heal_moves:
+                return ("attack", random.choice(heal_moves)["name"])
+            if hp_ratio < 0.25 and enemy_team_available and random.random() < 0.5:
+                return ("switch", random.choice(enemy_team_available))
+        if not ally_stats.get("status"):
+            status_moves = [m for m in move_data if m["status_to_inflict"]]
+            if status_moves:
+                return ("attack", random.choice(status_moves)["name"])
+        damage_moves = [m for m in move_data if m["power"] > 0]
+        if damage_moves:
+            return ("attack", max(damage_moves, key=lambda x: x["expected_damage"])["name"])
+        return ("attack", random.choice(moves))
+
+    elif ai_persona == "Trickster":
+        if enemy_team_available and random.random() < 0.25:
             return ("switch", random.choice(enemy_team_available))
+        if not ally_stats.get("status"):
+            status_moves = [m for m in move_data if m["status_to_inflict"]]
+            if status_moves:
+                return ("attack", random.choice(status_moves)["name"])
+        debuff_moves = [m for m in move_data if m["stat_changes"]]
+        if debuff_moves and random.random() < 0.5:
+            return ("attack", random.choice(debuff_moves)["name"])
+        damage_moves = [m for m in move_data if m["power"] > 0]
+        if damage_moves:
+            return ("attack", random.choice(damage_moves)["name"])
+        return ("attack", random.choice(moves))
 
-    if status_move and not ally_stats.get("status"):
-        if random.random() < 0.25:
-            return ("attack", status_move)
-
-    for m, data, eff, _ in move_data:
-        if eff > 1.0 and random.random() < 0.6:
-            return ("attack", m)
-
-    attack_moves = [m for m, data, _, _ in move_data if MOVES.get(m, {}).get("power", 0) > 0]
-    if not attack_moves:
-        attack_moves = moves
-    return ("attack", random.choice(attack_moves))
+    else:  # Tactical
+        if hp_ratio < 0.30:
+            heal_moves = [m for m in move_data if m["heal_ratio"] > 0]
+            if heal_moves:
+                return ("attack", random.choice(heal_moves)["name"])
+            if enemy_team_available and random.random() < 0.6:
+                return ("switch", random.choice(enemy_team_available))
+        if not ally_stats.get("status"):
+            status_moves = [m for m in move_data if m["status_to_inflict"]]
+            valid_status_moves = []
+            for sm in status_moves:
+                inflict = sm["status_to_inflict"]
+                opp_type = ally_stats.get("type", "Normal")
+                if inflict == "Poison" and "Poison" in opp_type:
+                    continue
+                if inflict == "Paralyze" and "Electric" in opp_type:
+                    continue
+                valid_status_moves.append(sm)
+            if valid_status_moves and random.random() < 0.4:
+                return ("attack", random.choice(valid_status_moves)["name"])
+        super_effective = [m for m in move_data if m["eff"] > 1.0 and m["power"] > 0]
+        if super_effective:
+            return ("attack", max(super_effective, key=lambda x: x["expected_damage"])["name"])
+        damage_moves = [m for m in move_data if m["power"] > 0]
+        if damage_moves:
+            return ("attack", max(damage_moves, key=lambda x: x["expected_damage"])["name"])
+        return ("attack", random.choice(moves))
 
 
 # ============================================================
@@ -987,8 +1210,20 @@ def run_team_battle(player_team, enemy_team, weather, battle_context):
     apply_status_items(player_active)
     apply_status_items(enemy_active)
 
+    persona = battle_context.get("ai_persona", "Tactical")
+    trainer_name = battle_context.get("enemy_trainer_name", "Enemy Trainer")
+    low_hp_triggered = set()
+    log_persona_dialogue(persona, "start", trainer_name)
+
     participants = {player_active_name}
     turn_count = 0
+    battle_state = {
+        "mega_evolved": False,
+        "z_move_used": False,
+        "gigantamax_active": False,
+        "gigantamax_turns": 0,
+        "z_power_active": False
+    }
     from collections import Counter
 
     while True:
@@ -1009,9 +1244,23 @@ def run_team_battle(player_team, enemy_team, weather, battle_context):
         weather_msg2 = apply_weather_damage(weather, enemy_active)
         if weather_msg2[0] > 0:
             battle_log.log(weather_msg2[1], BRIGHT_YELLOW)
+            
+        env_rule = battle_context.get("env_rule")
+        if env_rule == "Gravity Surge":
+            if "Flying" in player_active.get("type", "Normal"):
+                dmg = max(1, player_active.get("maxhp", 1) // 16)
+                take_damage(player_active, dmg)
+                battle_log.log(f"Gravity Surge crushes {player_active_name}! (-{dmg} HP)", BRIGHT_MAGENTA)
+            if "Flying" in enemy_active.get("type", "Normal"):
+                dmg = max(1, enemy_active.get("maxhp", 1) // 16)
+                take_damage(enemy_active, dmg)
+                battle_log.log(f"Gravity Surge crushes {enemy_active_name}! (-{dmg} HP)", BRIGHT_MAGENTA)
 
         p_speed = player_active.get("speed", 50) * stage_multiplier(player_active.get("stages", {}), "speed")
         e_speed = enemy_active.get("speed", 50) * stage_multiplier(enemy_active.get("stages", {}), "speed")
+        
+        if env_rule == "Trick Room":
+            p_speed, e_speed = e_speed, p_speed
 
         first_name, first_stats, second_name, second_stats = (
             (player_active_name, player_active, enemy_active_name, enemy_active)
@@ -1042,7 +1291,10 @@ def run_team_battle(player_team, enemy_team, weather, battle_context):
 
             if not is_player:
                 available = [n for n in ey_index if n != cur_name and ey_index[n].get("hp", 0) > 0]
-                action_type, action_target = choose_enemy_action(cur_stats, opp_stats, available)
+                action_type, action_target = choose_enemy_action(
+                    cur_stats, opp_stats, available, persona,
+                    weather=weather, turn_count=turn_count, enemy_team_dict=ey_index
+                )
                 if action_type == "switch":
                     old_name = cur_name
                     battle_log.log(f"Enemy switched {cur_name} for {action_target}!", BRIGHT_RED)
@@ -1075,6 +1327,10 @@ def run_team_battle(player_team, enemy_team, weather, battle_context):
                     battle_log.show_history()
                     continue
                 elif action == "2":
+                    if battle_context.get("mode") == "Dungeon":
+                        print(f"  {BOLD}{BRIGHT_RED}❌ Items are banned in Dungeon Gauntlets!{RESET}")
+                        time.sleep(1)
+                        continue
                     from inventory import ITEMS as _
                     item_success, item_result = use_item_menu(battle_context.get("inventory", {}), cur_stats, battle_context.get("player_team"), cur_name)
                     if item_success and item_result is not None:
@@ -1117,9 +1373,13 @@ def run_team_battle(player_team, enemy_team, weather, battle_context):
                         time.sleep(0.8)
                     continue
                 else:
-                    chosen_move = select_move_menu(cur_name, cur_stats)
+                    chosen_move = select_move_menu(cur_name, cur_stats, battle_context.get("inventory"), battle_state)
                     if not chosen_move:
                         continue
+                    if cur_stats.get("name"):
+                        cur_name = cur_stats["name"]
+                        player_active_name = cur_name
+                        player_active = cur_stats
 
             move = MOVES.get(chosen_move, {"type": "Normal", "power": 40, "category": "Physical", "priority": 0})
             if not has_pp(cur_stats, chosen_move):
@@ -1136,6 +1396,8 @@ def run_team_battle(player_team, enemy_team, weather, battle_context):
                 use_pp(cur_stats, chosen_move)
                 is_crit = random.random() < 0.0625
                 final_damage, effectiveness = calculate_move_damage(chosen_move, cur_stats, opp_stats.get("type", "Normal"), weather, is_crit)
+                if battle_context.get("env_rule") == "Overdrive" and move.get("type", "Normal") == "Electric":
+                    final_damage = int(final_damage * 1.5)
                 eff_msg = ""
                 if effectiveness > 1.0:
                     eff_msg = f"  {BRIGHT_GREEN}It's super effective!{RESET}"
@@ -1148,12 +1410,18 @@ def run_team_battle(player_team, enemy_team, weather, battle_context):
                     type_effectiveness_flash(effectiveness)
 
                 take_damage(opp_stats, final_damage)
+                if battle_context.get("env_rule") == "Vampiric Field" and final_damage > 0:
+                    heal = max(1, int(final_damage * 0.10))
+                    cur_stats["hp"] = min(cur_stats["hp"] + heal, cur_stats.get("maxhp", 1))
+                    battle_log.log(f"Vampiric Field restored {heal} HP to {cur_name}!", BRIGHT_GREEN)
                 if is_player:
                     animate_attack_sequence(cur_name, opp_name, final_damage, is_crit)
                 else:
                     animate_enemy_attack_sequence(cur_name, opp_name, final_damage)
                 if is_crit:
                     battle_log.log("Critical hit!", BRIGHT_YELLOW)
+                    if not is_player:
+                        log_persona_dialogue(persona, "crit", trainer_name)
                 battle_log.log(f"-{final_damage} HP to {opp_name}!", BRIGHT_RED)
                 if eff_msg:
                     print(eff_msg)
@@ -1178,6 +1446,14 @@ def run_team_battle(player_team, enemy_team, weather, battle_context):
 
             time.sleep(0.8)
 
+            # Check for Low HP Dialogue trigger for enemy
+            if enemy_active_name not in low_hp_triggered:
+                ehp = enemy_active.get("hp", 0)
+                emax = enemy_active.get("maxhp", 1)
+                if 0 < ehp < emax * 0.30:
+                    low_hp_triggered.add(enemy_active_name)
+                    log_persona_dialogue(persona, "low_hp", trainer_name)
+
             if opp_stats.get("hp", 0) <= 0:
                 battle_log.log(f"{opp_name} fainted!", BRIGHT_RED)
                 km = apply_ko_ability(cur_stats)
@@ -1196,6 +1472,7 @@ def run_team_battle(player_team, enemy_team, weather, battle_context):
                         time.sleep(0.8)
                     else:
                         player_won = True
+                        log_persona_dialogue(persona, "defeat", trainer_name)
                         for qid, q in quest_manager.hook_battle_win():
                             battle_log.log(f"Quest #{qid} complete! {q['reward_desc']}!", BRIGHT_YELLOW)
                         break
@@ -1243,6 +1520,15 @@ def run_team_battle(player_team, enemy_team, weather, battle_context):
                 sm = apply_status_items(ps)
                 for m in sm:
                     if m: battle_log.log(f"{pn}: {m}", BRIGHT_GREEN)
+
+        # Gigantamax turns decrement
+        if battle_state.get("gigantamax_active"):
+            battle_state["gigantamax_turns"] -= 1
+            if battle_state["gigantamax_turns"] <= 0:
+                battle_state["gigantamax_active"] = False
+                player_active["maxhp"] //= 2
+                player_active["hp"] = min(player_active["maxhp"], player_active["hp"] // 2)
+                battle_log.log(f"{player_active_name}'s Gigantamax wore off!", BRIGHT_RED)
 
         advance_time(2)
 
@@ -1334,3 +1620,117 @@ def generate_egg_data(p1_name, p2_name, p1_stats, p2_stats):
         "shiny": False,
         "is_fusion": False
     }
+
+
+def run_dungeon_raid(player_team, dungeon_choice, inventory):
+    """Executes a consecutive multi-battle Dungeon Raid without resetting player health or allowing items."""
+    import random
+    
+    clear_screen()
+    wipe_transition(width=50)
+    
+    # 1. Define Dungeons
+    dungeon_database = {
+        "1": {
+            "name": "Viridian Forest Gauntlet",
+            "weather": "Clear",
+            "opponents": [
+                {
+                    "trainer": "Bug Catcher Joey",
+                    "pokemon": {"caterpie": {"hp": 55, "maxhp": 55, "dm": 18, "speed": 45, "type": "Bug", "moves": ["Bug Bite", "Tackle"], "lvl": 18}}
+                },
+                {
+                    "trainer": "Bug Catcher Billy",
+                    "pokemon": {"weedle": {"hp": 60, "maxhp": 60, "dm": 19, "speed": 50, "type": "Bug", "moves": ["Poison Sting", "Tackle"], "lvl": 19}}
+                },
+                {
+                    "trainer": "Forest Guardian Spirit",
+                    "pokemon": {"bulbasaur": {"hp": 85, "maxhp": 85, "dm": 22, "speed": 45, "type": "Grass", "moves": ["Razor Leaf", "Vine Whip", "Tackle"], "lvl": 21}}
+                }
+            ]
+        },
+        "2": {
+            "name": "Mt. Chimney Volcano Gauntlet",
+            "weather": "Sunny",
+            "opponents": [
+                {
+                    "trainer": "Magma Grunt Kevin",
+                    "pokemon": {"charmander": {"hp": 160, "maxhp": 160, "dm": 45, "speed": 65, "type": "Fire", "moves": ["Ember", "Flamethrower", "Slash"], "lvl": 48}}
+                },
+                {
+                    "trainer": "Magma Grunt Sarah",
+                    "pokemon": {"onix": {"hp": 200, "maxhp": 200, "dm": 35, "speed": 70, "type": "Rock", "moves": ["Rock Throw", "Rock Slide", "Earthquake"], "lvl": 49}}
+                },
+                {
+                    "trainer": "Volcano Sentinel",
+                    "pokemon": {"pikachander": {"hp": 220, "maxhp": 220, "dm": 55, "speed": 85, "type": "Fire", "moves": ["Flamethrower", "Thunderbolt", "Ember", "Quick Attack"], "lvl": 52}}
+                }
+            ]
+        },
+        "3": {
+            "name": "Cerulean Cave Overlord Gauntlet",
+            "weather": "Fog",
+            "opponents": [
+                {
+                    "trainer": "Elite Ranger Tom",
+                    "pokemon": {"lucario": {"hp": 320, "maxhp": 320, "dm": 85, "speed": 90, "type": "Fighting", "moves": ["Close Combat", "Extreme Speed", "Brick Break"], "lvl": 78}}
+                },
+                {
+                    "trainer": "Elite Ranger Julia",
+                    "pokemon": {"tyranitar": {"hp": 380, "maxhp": 380, "dm": 95, "speed": 65, "type": "Rock", "moves": ["Stone Edge", "Earthquake", "Crunch"], "lvl": 79}}
+                },
+                {
+                    "trainer": "Psychic Cave Overlord",
+                    "pokemon": {"mewtwross": {"hp": 480, "maxhp": 480, "dm": 115, "speed": 110, "type": "Psychic", "moves": ["Psychic", "Cosmic Rage", "Shadow Ball", "Recover"], "lvl": 85}}
+                }
+            ]
+        }
+    }
+    
+    dungeon = dungeon_database.get(dungeon_choice)
+    if not dungeon:
+        print(f"  {BOLD}{BRIGHT_RED}❌ Invalid Dungeon Choice!{RESET}")
+        return False
+        
+    fancy_header(dungeon["name"].upper(), emoji="🏰", width=55)
+    print(f"  {BOLD}Entering dungeon! Prepare your team for {len(dungeon['opponents'])} sequential battles!{RESET}")
+    print()
+    crazy_input("Press Enter to begin the gauntlet")
+    
+    for idx, challenge in enumerate(dungeon["opponents"], 1):
+        clear_screen()
+        fancy_header(f"BATTLE {idx}/{len(dungeon['opponents'])}", emoji="⚔️", width=55)
+        print(f"  {BOLD}Opponent: {challenge['trainer']}!{RESET}")
+        print(f"  {DIM}Opponent Team: {', '.join(challenge['pokemon'].keys()).upper()}{RESET}")
+        print()
+        crazy_input("Press Enter to initiate combat!")
+        
+        battle_context = {
+            "mode": "Dungeon",
+            "inventory": inventory,
+            "player_team": player_team
+        }
+        
+        won, xp_earned, money_earned = run_team_battle(player_team, challenge["pokemon"], dungeon["weather"], battle_context)
+        
+        if not won:
+            print()
+            fancy_header("DUNGEON FAILURE", emoji="💀", width=55)
+            print(f"  {BOLD}{BRIGHT_RED}❌ You were defeated by {challenge['trainer']}!{RESET}")
+            print(f"  {DIM}Ejected from the dungeon...{RESET}")
+            print()
+            crazy_input("Press Enter to return")
+            return False
+            
+        print()
+        print(f"  {BOLD}{BRIGHT_GREEN}✅ Defeated {challenge['trainer']}!{RESET}")
+        if idx < len(dungeon["opponents"]):
+            print(f"  {DIM}Moving deeper into the dungeon...{RESET}")
+            time.sleep(2)
+            
+    print()
+    fancy_header("DUNGEON CONQUERED! 🎉", emoji="🏆", width=55)
+    print_art(VICTORY_ROYALE_ART, rainbow_text)
+    print(f"  {BOLD}{BRIGHT_GREEN}Congratulations! You successfully cleared all rooms in the {dungeon['name']}!{RESET}")
+    print()
+    return True

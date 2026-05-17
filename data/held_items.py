@@ -1,7 +1,7 @@
 """Held Items System: 52 items with battle engine hooks."""
 
 import random
-from animations import item_flash, healing_flash
+from ui_core import item_flash, healing_flash
 
 HELD_ITEMS = {
     "Leftovers":    {"name":"Leftovers","desc":"Restores 1/16 max HP each turn.","trigger":"on_turn","effect":"heal","ratio":1/16,"price":2000},

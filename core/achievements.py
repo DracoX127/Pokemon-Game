@@ -1,11 +1,10 @@
 """Achievement System: 35 milestones to track player progress."""
 
-from crazy_style import (
+from ui_core import (
     RESET, BOLD, DIM, BRIGHT_WHITE, BRIGHT_CYAN, BRIGHT_YELLOW,
     BRIGHT_GREEN, BRIGHT_RED, BRIGHT_MAGENTA,
-    crazy_input, clear_screen
+    crazy_input, clear_screen, fancy_header
 )
-from animations import fancy_header
 
 ACHIEVEMENTS = [
     {"id":1, "name":"First Step",      "desc":"Catch your first Pokemon.", "icon":"🐣", "category":"catch", "threshold":1, "reward":{"type":"coins","value":50}},

@@ -11,7 +11,7 @@ def generate():
         f.write('gradient box widgets, and 60 cinematic multi-frame combat visualizers.\n')
         f.write('========================================================================\n')
         f.write('"""\n\n')
-        f.write("from crazy_style import *\n")
+        f.write("from ui_core import *\n")
         f.write("import time\n")
         f.write("import sys\n")
         f.write("import random\n\n")

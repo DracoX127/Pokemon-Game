@@ -1,7 +1,7 @@
 """Ability System: 71 abilities with battle engine hooks and full 483-pokemon + form mapping."""
 
 import random
-from animations import ability_activation
+from ui_core import ability_activation
 
 ABILITY_ACTIVATION_TEXT = {
     "Overgrow":"Overgrow! Grass power surges!","Blaze":"Blaze! Fire rages hotter!","Torrent":"Torrent! Water swells!",

@@ -3,6 +3,28 @@ import os
 import random
 from pokemon_dex import weak_pokemon, moderately_strong_pokemon, strong_pokemon, ultra_strong_pokemon
 
+def get_fusion_type(name1, name2):
+    """Get the blended type for a fusion of two pokemon."""
+    for dex in [weak_pokemon, moderately_strong_pokemon, strong_pokemon, ultra_strong_pokemon]:
+        if name1 in dex:
+            t1 = dex[name1].get("type", "Normal")
+            break
+    else:
+        t1 = "Normal"
+    for dex in [weak_pokemon, moderately_strong_pokemon, strong_pokemon, ultra_strong_pokemon]:
+        if name2 in dex:
+            t2 = dex[name2].get("type", "Normal")
+            break
+    else:
+        t2 = "Normal"
+    if t1 == t2:
+        return t1
+    type_priority = ["Fire", "Water", "Grass", "Electric", "Psychic", "Ice", "Dragon", "Dark", "Steel", "Fighting", "Ghost", "Poison", "Ground", "Flying", "Bug", "Rock", "Normal"]
+    for t in type_priority:
+        if t == t1 or t == t2:
+            return t
+    return t1
+
 def generate_fusion_name(name1, name2):
     part1 = name1[:len(name1)//2]
     part2 = name2[len(name2)//2:]

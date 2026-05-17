@@ -55,7 +55,7 @@ from game_functions import (
     run_team_battle, get_max_pp, stage_multiplier, apply_stat_stage, reset_stages,
     has_pp, use_pp, struggle_damage, offer_to_learn_move, restore_all_pp, make_pokemon,
     get_eligible_learnset_moves, take_damage, clamp_hp,
-    calculate_daycare_average_exp, calculate_breeding_compatibility, generate_egg_data
+    calculate_daycare_average_exp, calculate_breeding_compatibility, generate_egg_data, run_dungeon_raid
 )
 from weather_engine import get_random_weather, apply_weather_damage
 from status_manager import apply_status_tick, can_attack
@@ -64,11 +64,8 @@ from world_map import REGIONS
 from fusion_dex import FUSION_DEX
 from moves_data import MOVES
 from inventory import ITEMS
-from crazy_style import *
-from animations import *
-from ascii_art import *
+from ui_core import *
 from save_manager import save_game, load_game
-from battle_log import battle_log
 from quest_manager import quest_manager
 from achievements import achievement_manager, AchievementManager, ACHIEVEMENTS
 from settings import GAME_SETTINGS
@@ -84,6 +81,7 @@ from game_functions import (
 )
 pokemon = {}
 money = 500
+pvp_rp = 1000
 heal_tickets = 50
 trophies = 0
 inventory = {"Potion": 3, "Ultra Ball": 1} # Starter pack
@@ -230,7 +228,7 @@ print(f"  {BOLD}{BRIGHT_YELLOW}2.{RESET} 📝 Register a New Cloud Account")
 print(f"  {BOLD}{DIM}3.{RESET} 🔌 Play Offline (Local Saves Only)")
 print()
 theme_divider(50)
-gateway_opt = crazy_input("Choose an option (1, 2, or 3)")
+gateway_opt = crazy_input("Choose an option (1, 2, or 3)").strip()
 
 cloud_token = None
 cloud_username = None
@@ -238,8 +236,8 @@ load_success = False
 daycare = {"slots": [], "steps": 0, "egg_waiting": False}
 
 if gateway_opt == "1":
-    username = crazy_input("Username")
-    password = crazy_input("Password")
+    username = crazy_input("Username").strip()
+    password = crazy_input("Password").strip()
     try:
         r = robust_request("POST", f"{SERVER_URL}/login", json_data={"username": username, "password": password}, timeout=5)
         if r.status_code == 200:
@@ -256,6 +254,7 @@ if gateway_opt == "1":
                     name = data.get("name", "Trainer")
                     pokemon = data.get("pokemon", {})
                     money = data.get("money", 500)
+                    pvp_rp = data.get("pvp_rp", 1000)
                     trophies = data.get("trophies", 0)
                     inventory = data.get("inventory", {"Potion": 3})
                     location = data.get("location", "Grasslands")
@@ -284,8 +283,8 @@ if gateway_opt == "1":
         time.sleep(1.5)
 
 elif gateway_opt == "2":
-    username = crazy_input("Choose Username")
-    password = crazy_input("Choose Password")
+    username = crazy_input("Choose Username").strip()
+    password = crazy_input("Choose Password").strip()
     try:
         r = robust_request("POST", f"{SERVER_URL}/register", json_data={"username": username, "password": password}, timeout=5)
         if r.status_code == 201:
@@ -319,6 +318,7 @@ if not load_success:
             name = saved_state.get('name', 'Trainer')
             pokemon = saved_state.get('pokemon', {})
             money = saved_state.get('money', 500)
+            pvp_rp = saved_state.get('pvp_rp', 1000)
             trophies = saved_state.get('trophies', 0)
             inventory = saved_state.get('inventory', {"Potion": 3})
             location = saved_state.get('location', "Grasslands")
@@ -337,7 +337,12 @@ if not load_success:
             time.sleep(1)
 
 if not load_success:
-    name = crazy_input("Enter ur name")
+    if cloud_username:
+        name = cloud_username
+        print(f"  {BRIGHT_GREEN}👋 Welcome to the world of Pokémon, {name}!{RESET}")
+        time.sleep(1)
+    else:
+        name = crazy_input("Enter ur name").strip()
     print()
     pokeball_loading("Registering trainer", duration=1.0)
     print()
@@ -669,16 +674,18 @@ try:
         print(f"  {BOLD}{BRIGHT_RED}15.{RESET} 🐛 Bug Hunt           {DIM}[Corrupted gauntlet]{RESET}")
         egg_notif = f" {BOLD}{BRIGHT_YELLOW}[☁️ Egg Ready!]{RESET}" if daycare.get("egg_waiting") else ""
         print(f"  {BOLD}{BRIGHT_YELLOW}16.{RESET} 🏡 Daycare & Breeding {DIM}[Level & Breed]{RESET}{egg_notif}")
+        print(f"  {BOLD}{BRIGHT_BLUE}17.{RESET} 📶 GTS & Ranked PvP   {DIM}[Online station]{RESET}")
+        print(f"  {BOLD}{BRIGHT_MAGENTA}18.{RESET} 🏰 Dungeon Gauntlets  {DIM}[Endurance Gauntlet]{RESET}")
         print()
         gym_badges_check = [b for b in badges if any(b == g[1]["badge"] for g in GYM_LEADERS.items())]
         if len(gym_badges_check) >= len(GYM_LEADERS):
             ef_status = f"{len(elite_four_defeated)}/5 beaten"
-            print(f"  {BOLD}{BRIGHT_YELLOW}17.{RESET} 👑 Elite Four          {DIM}[{ef_status}]{RESET}")
+            print(f"  {BOLD}{BRIGHT_YELLOW}19.{RESET} 👑 Elite Four          {DIM}[{ef_status}]{RESET}")
             print()
-        print(f"  {BOLD}{DIM}{'18' if len(gym_badges_check) >= len(GYM_LEADERS) else '17'}.{RESET} 🚪 Save & Leave")
+        print(f"  {BOLD}{DIM}{'20' if len(gym_badges_check) >= len(GYM_LEADERS) else '19'}.{RESET} 🚪 Save & Leave")
         print()
         theme_divider(50)
-        max_option = 18 if len(gym_badges_check) >= len(GYM_LEADERS) else 17
+        max_option = 20 if len(gym_badges_check) >= len(GYM_LEADERS) else 19
         option = crazy_int_input("What do you want to do now")
         print()
 
@@ -736,6 +743,13 @@ try:
                     your_status = pokemon[poke_choice].get("status", None)
                     countdown(3)
                     battle_log.clear()
+                    battle_state = {
+                        "mega_evolved": False,
+                        "z_move_used": False,
+                        "gigantamax_active": False,
+                        "gigantamax_turns": 0,
+                        "z_power_active": False
+                    }
                     battle_hud(poke_choice, pokemon[poke_choice]["hp"], pokemon[poke_choice]["maxhp"],
                                pokemon[poke_choice]["dm"], wild, enemyhp, original_enemyhp, enemydm,
                                your_status=your_status, enemy_status=enemy_status, weather=battle_weather,
@@ -812,8 +826,10 @@ try:
                             continue
 
                         if boption == 1:
-                            move = select_move_menu(poke_choice, pokemon[poke_choice])
+                            move = select_move_menu(poke_choice, pokemon[poke_choice], inventory, battle_state)
                             if not move: continue
+                            if pokemon[poke_choice].get("name"):
+                                poke_choice = pokemon[poke_choice]["name"]
                             if not has_pp(pokemon[poke_choice], move):
                                 print(f"  {BOLD}{BRIGHT_RED}❌ No PP left for {move}!{RESET}")
                                 continue
@@ -889,6 +905,15 @@ try:
                                        your_ability=pokemon[poke_choice].get("ability"),
                                        your_item=pokemon[poke_choice].get("hold_item"))
                                         
+                            # Gigantamax turns decrement
+                            if battle_state.get("gigantamax_active"):
+                                battle_state["gigantamax_turns"] -= 1
+                                if battle_state["gigantamax_turns"] <= 0:
+                                    battle_state["gigantamax_active"] = False
+                                    pokemon[poke_choice]["maxhp"] //= 2
+                                    pokemon[poke_choice]["hp"] = min(pokemon[poke_choice]["maxhp"], pokemon[poke_choice]["hp"] // 2)
+                                    print(f"\n  {BOLD}{BRIGHT_RED}👹 {poke_choice}'s Gigantamax wore off!{RESET}")
+
                             if pokemon[poke_choice]["hp"] <= 0:
                                 print_art(DEFEAT_ART, lambda t: gradient_text(t, (255, 0, 0), (80, 0, 0)))
                                 defeat_rain(lines=3, width=35)
@@ -900,6 +925,26 @@ try:
                             if is_shiny: prob -= 15
                             if "Ultra Ball" in inventory and inventory["Ultra Ball"] > 0: prob += 25
                             if "Master Ball" in inventory and inventory["Master Ball"] > 0: prob = 100
+                            
+                            if prob < 100:
+                                print(f"\n  {BOLD}{BRIGHT_MAGENTA}⚡ TACTICAL THROW INITIATED! ⚡{RESET}")
+                                print(f"  {DIM}Type 'CATCH' as fast as you can to boost capture rate!{RESET}")
+                                time.sleep(1.0)
+                                print(f"  {BOLD}{BRIGHT_YELLOW}READY...{RESET}")
+                                time.sleep(0.5)
+                                print(f"  {BOLD}{BRIGHT_GREEN}GO!{RESET}")
+                                
+                                start_time = time.time()
+                                user_type = input(f"  > ").strip().upper()
+                                elapsed = time.time() - start_time
+                                
+                                if user_type == "CATCH" and elapsed <= 2.5:
+                                    print(f"  {BOLD}{BRIGHT_CYAN}⭐ PERFECT TIMING! ({elapsed:.2f}s) Catch Rate Doubled! ⭐{RESET}")
+                                    prob *= 2
+                                elif user_type == "CATCH":
+                                    print(f"  {DIM}Too slow! ({elapsed:.2f}s) No bonus applied.{RESET}")
+                                else:
+                                    print(f"  {DIM}Missed! No bonus applied.{RESET}")
                             
                             spinner_animation("Throwing ball", duration=1.0)
                             catch_roll = random.randint(1, 100)
@@ -1503,6 +1548,94 @@ try:
                     for qid, q in quest_manager.hook_explore(location):
                         print(f"  {BRIGHT_YELLOW}🎉 Quest #{qid} complete! {q['reward_desc']}!{RESET}")
                     achievement_manager.hook_explore(len(set([location] + [location])))
+                    
+                    # 20% chance to trigger a Procedural World Event during Travel!
+                    if random.random() < 0.20:
+                        time.sleep(1)
+                        clear_screen()
+                        print_art(RANDOM_EVENT_ART, lambda t: gradient_text(t, (255, 100, 100), (255, 200, 50)))
+                        time.sleep(1.5)
+                        
+                        event_roll = random.randint(1, 5)
+                        if event_roll == 1:
+                            fancy_header("TREASURE CACHE", emoji="🎒", width=50)
+                            print(f"  {BOLD}You discovered a hidden metal chest in the tall grass!{RESET}")
+                            chest_items = ["Master Ball", "Rare Candy", "Ultra Ball", "Max Potion", "Dusk Stone", "Charizardite Y"]
+                            reward_item = random.choice(chest_items)
+                            inventory[reward_item] = inventory.get(reward_item, 0) + 1
+                            print(f"  {BOLD}{BRIGHT_GREEN}🎁 Obtained: 1x {reward_item}!{RESET}")
+                            
+                        elif event_roll == 2:
+                            fancy_header("WILD RESCUE", emoji="🐾", width=50)
+                            print(f"  {BOLD}You hear a faint whimper and spot an injured EEVEE cornered by a large boulder!{RESET}")
+                            print()
+                            print(f"  {BOLD}{BRIGHT_CYAN}1.{RESET} Offer Potion from your Bag")
+                            print(f"  {BOLD}{BRIGHT_YELLOW}2.{RESET} Shoo away wild threats and help it escape")
+                            choice = crazy_input("Choose action").strip()
+                            if choice == "1" and inventory.get("Potion", 0) > 0:
+                                inventory["Potion"] -= 1
+                                print(f"\n  {BOLD}{BRIGHT_GREEN}💖 The Eevee drinks the potion and feels restored!{RESET}")
+                                print(f"  {BOLD}It rubs against your leg gratefully and decides to join your active team!{RESET}")
+                                pokemon["eevee"] = make_pokemon(100, 45, "Normal", ["Tackle", "Swift"], speed=60)
+                                pokedex_seen.add("eevee")
+                                pokedex_caught.add("eevee")
+                            else:
+                                print(f"\n  {BOLD}You safely shoo away wild threats. The Eevee runs off happily!{RESET}")
+                                
+                        elif event_roll == 3:
+                            fancy_header("LEGENDARY SIGHTING", emoji="🌟", width=50)
+                            print(f"  {BOLD}{BRIGHT_MAGENTA}An imposing presence appears! The sky turns crimson...{RESET}")
+                            roamer_names = ["arceus", "mew", "celebi", "giratina"]
+                            roamer = random.choice(roamer_names)
+                            print(f"  {BOLD}{BRIGHT_YELLOW}⚡ A legendary wild {roamer.upper()} appeared! ⚡{RESET}")
+                            print()
+                            ans = crazy_input("Engage in legendary battle? (y/n)")
+                            if ans.lower() == 'y':
+                                avg_lvl = sum(m.get("lvl", 5) for m in pokemon.values()) // len(pokemon)
+                                enemy_mon = {roamer: make_pokemon(int(avg_lvl * 15), int(avg_lvl * 8), "Psychic", ["Confusion", "Swift"], speed=100)}
+                                enemy_mon[roamer]["lvl"] = avg_lvl + 5
+                                
+                                pvp_battle_context = {"mode": "Wild Encounter", "inventory": inventory, "player_team": pokemon}
+                                run_team_battle(pokemon, enemy_mon, "Fog", pvp_battle_context)
+                                
+                        elif event_roll == 4:
+                            fancy_header("TRAVELING MERCHANT", emoji="🏪", width=50)
+                            print(f"  {BOLD}A shady traveling merchant calls out to you...{RESET}")
+                            print(f"  \"Psst! Hey kid, I have a rare item at a special price...\"")
+                            print(f"  Offers: {BOLD}{BRIGHT_YELLOW}Mystic Z-Crystal{RESET} for {BOLD}600 coins{RESET}.")
+                            print()
+                            merchant_ans = crazy_input("Purchase the mystery crystal? (y/n)")
+                            if merchant_ans.lower() == 'y':
+                                if money >= 600:
+                                    money -= 600
+                                    crystal = random.choice(["Grassium Z", "Firium Z", "Waterium Z", "Electrium Z"])
+                                    inventory[crystal] = inventory.get(crystal, 0) + 1
+                                    print(f"\n  {BOLD}{BRIGHT_GREEN}🛍️ Purchased 1x {crystal}!{RESET}")
+                                else:
+                                    print(f"\n  {BOLD}{BRIGHT_RED}❌ Not enough coins!{RESET}")
+                                    
+                        elif event_roll == 5:
+                            fancy_header("TRAINER AMBUSH!", emoji="⚔️", width=50)
+                            print(f"  {BOLD}{BRIGHT_RED}An elite trainer jumps out from the shadows!{RESET}")
+                            print(f"  \"No traveler passes my path without a battle!\"{RESET}")
+                            print()
+                            crazy_input("Prepare for battle! Press Enter")
+                            avg_lvl = sum(m.get("lvl", 5) for m in pokemon.values()) // len(pokemon)
+                            opp_team = {
+                                "garchomp": make_pokemon(int(avg_lvl * 12), int(avg_lvl * 6), "Dragon", ["Tackle"], speed=80),
+                                "lucario": make_pokemon(int(avg_lvl * 10), int(avg_lvl * 7), "Steel", ["Tackle"], speed=75)
+                            }
+                            opp_team["garchomp"]["lvl"] = avg_lvl
+                            opp_team["lucario"]["lvl"] = avg_lvl
+                            
+                            pvp_battle_context = {"mode": "Trainer Battle", "inventory": inventory, "player_team": pokemon}
+                            won, pvp_xp, pvp_money = run_team_battle(pokemon, opp_team, "Clear", pvp_battle_context)
+                            if won:
+                                reward_coins = avg_lvl * 100
+                                money += reward_coins
+                                print(f"\n  {BOLD}{BRIGHT_GREEN}🎉 You defeated the ambush! Gained {reward_coins} coins!{RESET}")
+                                
+                        crazy_input("\nPress Enter to complete travel")
                 time.sleep(1)
 
         # ══════════════════════════════════════
@@ -1679,6 +1812,19 @@ try:
             ans = crazy_input("Enter the tower? (y/n)")
             if ans.lower() != 'y':
                 continue
+                
+            print(f"  {DIM}You currently have {money} PokéCoins.{RESET}")
+            wager_str = crazy_input("Wager PokéCoins? (Doubles every 5 rounds, lose all if you faint)").strip()
+            wager = 0
+            if wager_str.isdigit():
+                wager = int(wager_str)
+                if wager > money:
+                    print(f"  {DIM}You don't have that much! Wager set to 0.{RESET}")
+                    wager = 0
+                elif wager > 0:
+                    money -= wager
+                    print(f"  {BOLD}{BRIGHT_YELLOW}🎰 Wager locked: {wager} PokéCoins! Let it ride!{RESET}")
+                    time.sleep(1.0)
             tower_round = 0
             while True:
                 tower_round += 1
@@ -1692,19 +1838,41 @@ try:
                     ehp = int(ehp * (1 + tower_round * 0.03))
                     edm = int(edm * (1 + tower_round * 0.03))
                     enemy_team[ename] = {"hp": ehp, "maxhp": ehp, "dm": edm, "speed": espd, "type": etyp, "moves": emoves, "lvl": level // 10 + 1}
+                env_rules = {
+                    "Normal": None,
+                    "Gravity Surge": "Flying-types are grounded and take damage over time.",
+                    "Overdrive": "Electric-type moves deal 1.5x damage.",
+                    "Trick Room": "Slower Pokémon move first.",
+                    "Vampiric Field": "All attacks drain 10% of damage dealt as HP."
+                }
+                current_rule = random.choice(list(env_rules.keys()))
+                
                 print(f"\n  {BOLD}{BRIGHT_YELLOW}═══ TOWER ROUND {tower_round} ═══{RESET}")
+                if current_rule != "Normal":
+                    print(f"  {BOLD}{BRIGHT_MAGENTA}🌌 ENVIRONMENTAL RULE: {current_rule} 🌌{RESET}")
+                    print(f"  {DIM}{env_rules[current_rule]}{RESET}")
                 print(f"  {BOLD}{BRIGHT_RED}Enemy team:{RESET}")
                 for pn, st in enemy_team.items():
                     print(f"    {pn}  Lvl {st['lvl']}  {st['type']}  HP:{st['hp']} DM:{st['dm']}")
                 print()
                 tower_weather = get_random_weather()
-                battle_context = {"mode": "Tower", "inventory": inventory, "player_team": pokemon}
+                battle_context = {"mode": "Tower", "inventory": inventory, "player_team": pokemon, "env_rule": current_rule}
                 won, xp_dict, money_gained = run_team_battle(pokemon, enemy_team, tower_weather, battle_context)
                 if not won:
                     print_art(DEFEAT_ART, lambda t: gradient_text(t, (255, 0, 0), (80, 0, 0)))
                     defeat_rain(lines=3, width=35)
                     print(f"  {BOLD}{BRIGHT_RED}💀 Tower run ended at Round {tower_round}!{RESET}")
+                    if wager > 0:
+                        print(f"  {DIM}You lost your accumulated wager of {wager} PokéCoins.{RESET}")
                     break
+                    
+                if tower_round % 5 == 0 and wager > 0:
+                    payout = wager * 2
+                    money += payout
+                    print(f"\n  {BOLD}{BRIGHT_YELLOW}🎰 TOWER CHECKPOINT REACHED! 🎰{RESET}")
+                    print(f"  {BOLD}{BRIGHT_GREEN}Wager payout: +{payout} PokéCoins!{RESET}")
+                    wager = payout
+                    time.sleep(1.5)
                 trophies += 50 * tower_round
                 if tower_round > tower_record:
                     tower_record = tower_round
@@ -1832,6 +2000,41 @@ try:
             print(f"  {BOLD}{BRIGHT_YELLOW}SPD: {dex_speed} × {spd_mult:.2f} = {f_spd}{RESET}")
             print(f"  {BOLD}{BRIGHT_WHITE}Generation: {new_gen}/5{RESET}")
             print()
+
+            # Parent types for secret move check
+            t1 = pokemon[p1].get("type", "Normal")
+            t2 = pokemon[p2].get("type", "Normal")
+            
+            secret_map = {
+                frozenset(["Fire", "Water"]): "Steam Overload",
+                frozenset(["Fire", "Grass"]): "Chloroflame",
+                frozenset(["Electric", "Water"]): "Hydro-Shock",
+                frozenset(["Grass", "Water"]): "Swamp Entrap",
+                frozenset(["Dragon", "Psychic"]): "Cosmic Rage",
+                frozenset(["Ghost", "Dark"]): "Shadow Void",
+                frozenset(["Rock", "Ground"]): "Earth Shatter",
+                frozenset(["Ice", "Water"]): "Glacial Avalanche",
+                frozenset(["Electric", "Fire"]): "Plasma Bolt",
+                frozenset(["Fighting", "Steel"]): "Iron Fist"
+            }
+            
+            secret_move = secret_map.get(frozenset([t1, t2]), "Core Fusion")
+            print(f"  {BOLD}{BRIGHT_MAGENTA}✨ RESONANCE DETECTED! ✨{RESET}")
+            print(f"  Parent types {t1} + {t2} have unlocked a Secret Hybrid Move: {BOLD}{BRIGHT_GREEN}{secret_move}{RESET}!")
+            print()
+            teach_ans = crazy_input(f"Would you like to teach {f_name} the custom move '{secret_move}'? (y/n)")
+            if teach_ans.lower() == 'y':
+                if secret_move not in f_moves:
+                    if len(f_moves) < 4:
+                        f_moves.append(secret_move)
+                    else:
+                        print(f"\n  {BOLD}Choose a move to replace:{RESET}")
+                        for idx, mv in enumerate(f_moves, 1):
+                            print(f"  {BOLD}{idx}.{RESET} {mv}")
+                        replace_idx = crazy_int_input("Select move index")
+                        if 1 <= replace_idx <= len(f_moves):
+                            print(f"  {BOLD}{BRIGHT_GREEN}Forgotten {f_moves[replace_idx-1]} and learned {secret_move}!{RESET}")
+                            f_moves[replace_idx-1] = secret_move
 
             # Create the fused pokemon
             del pokemon[p1]
@@ -2159,14 +2362,289 @@ try:
                     break
 
 
-        exit_option = 18 if len(gym_badges_check) >= len(GYM_LEADERS) else 17
+        # ══════════════════════════════════════
+        # OPTION 17: GTS & RANKED PVP ARENA
+        # ══════════════════════════════════════
+        if option == 17:
+            while True:
+                clear_screen()
+                fancy_header("GTS & RANKED PVP STATION", emoji="📶", width=55)
+                tier = "Bronze"
+                tier_color = BRIGHT_RED
+                if pvp_rp >= 2500:
+                    tier = "Champion"
+                    tier_color = BRIGHT_YELLOW
+                elif pvp_rp >= 2200:
+                    tier = "Master"
+                    tier_color = BRIGHT_CYAN
+                elif pvp_rp >= 1800:
+                    tier = "Gold"
+                    tier_color = YELLOW
+                elif pvp_rp >= 1400:
+                    tier = "Silver"
+                    tier_color = WHITE
+                
+                print(f"  {BOLD}🏆 RANK TIER:{RESET} {tier_color}{tier.upper()}{RESET}  |  {BOLD}⭐ RP POINTS:{RESET} {BRIGHT_GREEN}{pvp_rp}{RESET}")
+                print()
+                print(f"  {BOLD}{BRIGHT_CYAN}1.{RESET} 🏟️  Ranked PvP Matchmaking   {DIM}[Standard 6v6 tier battle]{RESET}")
+                print(f"  {BOLD}{BRIGHT_YELLOW}2.{RESET} 📶 GTS Global Trade Station {DIM}[Trade active team Pokemon]{RESET}")
+                print(f"  {BOLD}{BRIGHT_MAGENTA}3.{RESET} 📋 Ranked Leaderboard        {DIM}[View global ladder tiers]{RESET}")
+                print(f"  {BOLD}{DIM}4.{RESET} 🚪 Exit Station")
+                print()
+                theme_divider(50)
+                station_choice = crazy_input("Enter your choice").strip()
+                
+                if station_choice == "1":
+                    clear_screen()
+                    fancy_header("RANKED MATCHMAKING", emoji="🏟️", width=55)
+                    print(f"  {DIM}Broadcasting battle request to GTS servers...{RESET}")
+                    spinner_animation("Searching for online opponents...", duration=5.0)
+                    print(f"  {BOLD}{BRIGHT_YELLOW}⚠️  No live players found at your skill level.{RESET}")
+                    print(f"  {DIM}Downloading Ghost AI Trainer Profile...{RESET}")
+                    time.sleep(1.0)
+                    
+                    opponents = [
+                        {"name": "Red", "tier": "Champion", "mons": ["Charizard", "Mewtwo", "Venusaur", "Blastoise", "Pikachu", "Snorlax"]},
+                        {"name": "Cynthia", "tier": "Master", "mons": ["Garchomp", "Milotic", "Lucario", "Togekiss", "Roserade", "Spiritomb"]},
+                        {"name": "Steven", "tier": "Gold", "mons": ["Metagross", "Aggron", "Skarmory", "Claydol", "Cradily", "Armaldo"]},
+                        {"name": "Blue", "tier": "Silver", "mons": ["Pidgeot", "Alakazam", "Rhydon", "Exeggutor", "Arcanine", "Gyarados"]},
+                        {"name": "Youngster Joey", "tier": "Bronze", "mons": ["Rattata", "Raticate", "Furret", "Bidoof", "Zigzagoon", "Sentret"]}
+                    ]
+                    if pvp_rp >= 2200:
+                        opp_data = random.choice([o for o in opponents if o["tier"] in ["Champion", "Master"]])
+                    elif pvp_rp >= 1400:
+                        opp_data = random.choice([o for o in opponents if o["tier"] in ["Gold", "Silver"]])
+                    else:
+                        opp_data = opponents[-1]
+                        
+                    opp_name = opp_data["name"]
+                    opp_tier = opp_data["tier"]
+                    
+                    print(f"\n  {BOLD}{BRIGHT_GREEN}⚔️ Match Found! ⚔️{RESET}")
+                    print(f"  {BOLD}Opponent:{RESET} {BRIGHT_CYAN}{opp_name}{RESET} ({BRIGHT_RED}{opp_tier} Tier{RESET})")
+                    print()
+                    ans = crazy_input("Accept ranked match? (y/n)")
+                    if ans.lower() != 'y': continue
+                    
+                    enemy_lvl = int(max(5, (pvp_rp - 500) // 15))
+                    opp_team = {}
+                    for mon in opp_data["mons"]:
+                        opp_team[mon.lower()] = make_pokemon(int(enemy_lvl * 12), int(enemy_lvl * 7), "Normal", ["Tackle", "Swift"], speed=int(enemy_lvl * 1.5))
+                        opp_team[mon.lower()]["lvl"] = enemy_lvl
+                        
+                    pvp_battle_context = {
+                        "mode": "Ranked PvP", 
+                        "inventory": inventory, 
+                        "player_team": pokemon,
+                        "ai_persona": random.choice(["Hyper-Offense", "Defensive", "Trickster", "Tactical"]),
+                        "enemy_trainer_name": opp_name
+                    }
+                    pvp_weather = get_random_weather()
+                    
+                    pvp_won, pvp_xp, pvp_money = run_team_battle(pokemon, opp_team, pvp_weather, pvp_battle_context)
+                    
+                    if pvp_won:
+                        rp_gain = 30
+                        pvp_rp += rp_gain
+                        coins_reward = enemy_lvl * 50
+                        money += coins_reward
+                        print()
+                        fancy_header("RANKED VICTORY", emoji="🏆", width=55)
+                        print(f"  {BOLD}{BRIGHT_GREEN}🎉 You defeated {opp_name}!{RESET}")
+                        print(f"  {BOLD}RP Gain:{RESET} {BRIGHT_GREEN}+{rp_gain} RP{RESET} (New RP: {pvp_rp})")
+                        print(f"  {BOLD}Bonus Reward:{RESET} {BRIGHT_YELLOW}+{coins_reward} coins!{RESET}")
+                    else:
+                        rp_loss = 20
+                        pvp_rp = max(1000, pvp_rp - rp_loss)
+                        print()
+                        fancy_header("RANKED DEFEAT", emoji="💀", width=55)
+                        print(f"  {BOLD}{BRIGHT_RED}❌ You fainted against {opp_name}...{RESET}")
+                        print(f"  {BOLD}RP Loss:{RESET} {BRIGHT_RED}-{rp_loss} RP{RESET} (New RP: {pvp_rp})")
+                        
+                    print()
+                    crazy_input("Press Enter to continue")
+                    
+                elif station_choice == "2":
+                    while True:
+                        clear_screen()
+                        fancy_header("GLOBAL TRADE STATION (GTS)", emoji="📶", width=55)
+                        print(f"  {BOLD}{BRIGHT_CYAN}1.{RESET} 📤 Upload Pokémon to GTS      {DIM}[List one of your team]{RESET}")
+                        print(f"  {BOLD}{BRIGHT_YELLOW}2.{RESET} 🔍 Search GTS Postings       {DIM}[Browse global offers]{RESET}")
+                        print(f"  {BOLD}{DIM}3.{RESET} 🚪 Return to Lobby")
+                        print()
+                        theme_divider(50)
+                        gts_choice = crazy_input("Enter choice").strip()
+                        
+                        if gts_choice == "1":
+                            clear_screen()
+                            fancy_header("UPLOAD POKÉMON", emoji="📤", width=55)
+                            if len(pokemon) <= 1:
+                                print(f"\n  {BOLD}{BRIGHT_RED}❌ You must keep at least 1 Pokémon on your active team!{RESET}")
+                                crazy_input("\nPress Enter to continue")
+                                continue
+                                
+                            print(f"  {BOLD}{BRIGHT_CYAN}Choose a Pokémon to deposit:{RESET}")
+                            mon_list = list(pokemon.keys())
+                            for idx, mon in enumerate(mon_list):
+                                print(f"  {BOLD}{idx+1}.{RESET} {mon.upper()} (LVL {pokemon[mon]['lvl']})")
+                            print(f"  {BOLD}{len(mon_list)+1}.{RESET} Back")
+                            print()
+                            
+                            upload_idx = crazy_int_input("Select a index")
+                            if 1 <= upload_idx <= len(mon_list):
+                                upload_mon = mon_list[upload_idx-1]
+                                wanted = crazy_input("What species do you want in exchange? (e.g. Charizard, Mewtwo)").strip().lower()
+                                
+                                print()
+                                pokeball_loading(f"Uploading {upload_mon.upper()} to GTS", duration=1.0)
+                                print(f"\n  {BOLD}{BRIGHT_GREEN}🚀 {upload_mon.upper()} uploaded! Searching cloud for matching trades...{RESET}")
+                                time.sleep(1.5)
+                                
+                                if wanted in ["charizard", "mewtwo", "garchomp", "pikachu", "arceus", "venusaur", "blastoise", "gengar"]:
+                                    print(f"  {BOLD}{BRIGHT_YELLOW}✨ Matching Offer Found!{RESET}")
+                                    print(f"  Another trainer has deposited a level 50 {wanted.upper()} in exchange for a {upload_mon.upper()}!")
+                                    confirm_trade = crazy_input("Confirm GTS trade? (y/n)")
+                                    if confirm_trade.lower() == 'y':
+                                        del pokemon[upload_mon]
+                                        pokemon[wanted] = make_pokemon(300, 150, "Dragon" if wanted=="garchomp" else "Psychic" if wanted=="mewtwo" else "Normal", ["Tackle", "Swift"], speed=95)
+                                        pokemon[wanted]["lvl"] = 50
+                                        
+                                        pokedex_seen.add(wanted)
+                                        pokedex_caught.add(wanted)
+                                        
+                                        clear_screen()
+                                        pokeball_loading("GTS Trade in Progress", duration=2.0)
+                                        sparkle_burst(duration=1.0, width=50)
+                                        print(f"\n  {BOLD}{rainbow_text('🎉 GTS TRADE COMPLETED SUCCESSFULLY! 🎉')}{RESET}")
+                                        print(f"  Traded away: {upload_mon.upper()} | Received: {wanted.upper()}!")
+                                else:
+                                    print(f"\n  {DIM}No matches found immediately. Your {upload_mon.upper()} remains listed.{RESET}")
+                                    
+                            crazy_input("\nPress Enter to continue")
+                            
+                        elif gts_choice == "2":
+                            clear_screen()
+                            fancy_header("SEARCH POSTINGS", emoji="🔍", width=55)
+                            postings = [
+                                {"offer": "Charizard", "lvl": 60, "wanted": "onix", "ability": "Blaze"},
+                                {"offer": "Mewtwo", "lvl": 70, "wanted": "pikachu", "ability": "Pressure"},
+                                {"offer": "Garchomp", "lvl": 55, "wanted": "gyarados", "ability": "Sand Veil"},
+                                {"offer": "Pikachu", "lvl": 45, "wanted": "pidgeot", "ability": "Static"}
+                            ]
+                            
+                            for idx, post in enumerate(postings):
+                                print(f"  {BOLD}{idx+1}.{RESET} Trainer wants: {BRIGHT_YELLOW}{post['wanted'].upper()}{RESET}  |  Offers: {BRIGHT_GREEN}{post['offer']} (LVL {post['lvl']}){RESET}")
+                            print(f"  {BOLD}{len(postings)+1}.{RESET} Back")
+                            print()
+                            
+                            search_idx = crazy_int_input("Select a trade offer")
+                            if 1 <= search_idx <= len(postings):
+                                chosen_post = postings[search_idx-1]
+                                wanted_mon = chosen_post["wanted"]
+                                offer_mon = chosen_post["offer"]
+                                
+                                if wanted_mon in pokemon:
+                                    if len(pokemon) <= 1:
+                                        print(f"\n  {BOLD}{BRIGHT_RED}❌ You must keep at least 1 Pokémon on your active team!{RESET}")
+                                    else:
+                                        confirm = crazy_input(f"Trade your {wanted_mon.upper()} for level {chosen_post['lvl']} {offer_mon}? (y/n)")
+                                        if confirm.lower() == 'y':
+                                            del pokemon[wanted_mon]
+                                            pokemon[offer_mon.lower()] = make_pokemon(int(chosen_post['lvl'] * 6), int(chosen_post['lvl'] * 4), "Fire" if offer_mon=="Charizard" else "Dragon", ["Tackle", "Swift"], speed=85)
+                                            pokemon[offer_mon.lower()]["lvl"] = chosen_post["lvl"]
+                                            pokemon[offer_mon.lower()]["ability"] = chosen_post["ability"]
+                                            
+                                            pokedex_seen.add(offer_mon.lower())
+                                            pokedex_caught.add(offer_mon.lower())
+                                            
+                                            clear_screen()
+                                            pokeball_loading("GTS Trade in Progress", duration=2.0)
+                                            sparkle_burst(duration=1.0, width=50)
+                                            print(f"\n  {BOLD}{rainbow_text('🎉 GTS TRADE COMPLETED SUCCESSFULLY! 🎉')}{RESET}")
+                                            print(f"  Traded away: {wanted_mon.upper()} | Received: {offer_mon}!{RESET}")
+                                else:
+                                    print(f"\n  {BOLD}{BRIGHT_RED}❌ You don't have a {wanted_mon.upper()} to trade!{RESET}")
+                                    
+                            crazy_input("\nPress Enter to continue")
+                            
+                        elif gts_choice == "3":
+                            break
+                            
+                elif station_choice == "3":
+                    clear_screen()
+                    fancy_header("RANKED PVP LEADERBOARD", emoji="📋", width=55)
+                    print(f"  {BOLD}{UNDERLINE}{'Rank':<8}{'Trainer Name':<20}{'RP Points':<15}{'Tier':<12}{RESET}")
+                    
+                    sim_leaders = [
+                        {"rank": 1, "name": "Red", "rp": 3150, "tier": "Champion"},
+                        {"rank": 2, "name": "Cynthia", "rp": 2980, "tier": "Champion"},
+                        {"rank": 3, "name": "Steven", "rp": 2720, "tier": "Master"},
+                        {"rank": 4, "name": "Blue", "rp": 2450, "tier": "Master"},
+                        {"rank": 5, "name": name, "rp": pvp_rp, "tier": tier},
+                        {"rank": 6, "name": "Lance", "rp": 2180, "tier": "Gold"},
+                        {"rank": 7, "name": "Joey", "rp": 1050, "tier": "Bronze"}
+                    ]
+                    sim_leaders.sort(key=lambda x: x["rp"], reverse=True)
+                    
+                    for idx, l in enumerate(sim_leaders):
+                        style = BOLD + BRIGHT_GREEN if l["name"] == name else ""
+                        print(f"  {style}{idx+1:<8}{l['name']:<20}{l['rp']:<15}{l['tier']:<12}{RESET}")
+                        
+                    print()
+                    crazy_input("Press Enter to return to lobby")
+                    
+                elif station_choice == "4":
+                    break
+
+        exit_option = 20 if len(gym_badges_check) >= len(GYM_LEADERS) else 19
         if option == exit_option:
             break
 
         # ══════════════════════════════════════
-        # OPTION 17: ELITE FOUR
+        # OPTION 18: DUNGEON GAUNTLETS
         # ══════════════════════════════════════
-        ef_option_number = 17 if len(gym_badges_check) >= len(GYM_LEADERS) else -1
+        if option == 18:
+            clear_screen()
+            if not pokemon:
+                print(f"\n  {BOLD}{BRIGHT_RED}❌ You need Pokemon first!{RESET}")
+                time.sleep(1)
+                continue
+                
+            fancy_header("DUNGEON GAUNTLETS", emoji="🏰", width=55)
+            print(f"  {DIM}High-difficulty sequential raids. Healing items are disabled!{RESET}")
+            print(f"  {DIM}Your team does NOT recover between battles!{RESET}")
+            print()
+            print(f"  {BOLD}{BRIGHT_GREEN}1.{RESET} Viridian Forest   {DIM}[Easy - Lv 20 | Rewards: Leaf Stone & 2k coins]{RESET}")
+            print(f"  {BOLD}{BRIGHT_YELLOW}2.{RESET} Mt. Chimney      {DIM}[Medium - Lv 50 | Sunny weather | Rewards: Firium Z & 5k coins]{RESET}")
+            print(f"  {BOLD}{BRIGHT_RED}3.{RESET} Cerulean Cave     {DIM}[Hard - Lv 80 | Boss: Fused Mewtwo | Mewtwonite Y]{RESET}")
+            print(f"  {BOLD}{DIM}Q. Back{RESET}")
+            print()
+            d_choice = crazy_input("Select Dungeon").strip()
+            if d_choice.lower() == 'q':
+                continue
+                
+            if d_choice in ["1", "2", "3"]:
+                won_raid = run_dungeon_raid(pokemon, d_choice, inventory)
+                if won_raid:
+                    if d_choice == "1":
+                        money += 2000
+                        inventory["Leaf Stone"] = inventory.get("Leaf Stone", 0) + 1
+                        print(f"\n  {BOLD}{BRIGHT_GREEN}🎉 Dungeon Beaten! Received Leaf Stone & 2000 coins!{RESET}")
+                    elif d_choice == "2":
+                        money += 5000
+                        inventory["Firium Z"] = inventory.get("Firium Z", 0) + 1
+                        print(f"\n  {BOLD}{BRIGHT_GREEN}🎉 Dungeon Beaten! Received Firium Z & 5000 coins!{RESET}")
+                    elif d_choice == "3":
+                        money += 15000
+                        inventory["Mewtwonite Y"] = inventory.get("Mewtwonite Y", 0) + 1
+                        print(f"\n  {BOLD}{BRIGHT_GREEN}🎉 Cerulean Cave Conqueror! Received Mewtwonite Y & 15000 coins!{RESET}")
+                    crazy_input("Press Enter to continue")
+                continue
+
+        # ══════════════════════════════════════
+        # OPTION 19: ELITE FOUR
+        # ══════════════════════════════════════
+        ef_option_number = 19 if len(gym_badges_check) >= len(GYM_LEADERS) else -1
         if option == ef_option_number:
             clear_screen()
             if not pokemon:
@@ -2262,19 +2740,19 @@ except Exception as e:
     print()
     ans = crazy_input("Would you like to save your game before closing? (y/n)")
     if ans.lower() == 'y':
-        if save_game(name, pokemon, money, heal_tickets, trophies, inventory, location, badges, tower_record, pokedex_seen, pokedex_caught, elite_four_defeated, achievement_manager.to_dict(), daycare=daycare):
+        if save_game(name, pokemon, money, heal_tickets, trophies, inventory, location, badges, tower_record, pokedex_seen, pokedex_caught, elite_four_defeated, achievement_manager.to_dict(), daycare=daycare, pvp_rp=pvp_rp):
             print(f"  {BOLD}{BRIGHT_GREEN}💾 Game saved! Come back anytime!{RESET}")
         time.sleep(1)
 
 # ══════════════════════════════════════
 # SAVE ON EXIT
 # ══════════════════════════════════════
-if save_game(name, pokemon, money, heal_tickets, trophies, inventory, location, badges, tower_record, pokedex_seen, pokedex_caught, elite_four_defeated, achievement_manager.to_dict(), daycare=daycare):
+if save_game(name, pokemon, money, heal_tickets, trophies, inventory, location, badges, tower_record, pokedex_seen, pokedex_caught, elite_four_defeated, achievement_manager.to_dict(), daycare=daycare, pvp_rp=pvp_rp):
     print(f"  {BOLD}{BRIGHT_GREEN}✅ Game saved successfully locally!{RESET}")
     if cloud_token:
         try:
             print(f"  {DIM}☁️  Auto-pushing save to cloud...{RESET}")
-            save_data = json.dumps({"name": name, "pokemon": pokemon, "money": money, "trophies": trophies, "inventory": inventory, "location": location, "badges": badges, "tower_record": tower_record, "pokedex_seen": list(pokedex_seen), "pokedex_caught": list(pokedex_caught), "elite_four_defeated": elite_four_defeated, "achievements": achievement_manager.to_dict(), "daycare": daycare})
+            save_data = json.dumps({"name": name, "pokemon": pokemon, "money": money, "pvp_rp": pvp_rp, "trophies": trophies, "inventory": inventory, "location": location, "badges": badges, "tower_record": tower_record, "pokedex_seen": list(pokedex_seen), "pokedex_caught": list(pokedex_caught), "elite_four_defeated": elite_four_defeated, "achievements": achievement_manager.to_dict(), "daycare": daycare})
             r = robust_request("POST", f"{SERVER_URL}/save", json_data={"save_data": save_data}, headers={"Authorization": f"Bearer {cloud_token}"}, timeout=5)
             if r.status_code == 200:
                 print(f"  {BRIGHT_GREEN}✅ Cloud save updated!{RESET}")

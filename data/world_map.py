@@ -1,7 +1,7 @@
 """
 World Map System: Regions and Spawns
 """
-from ascii_art import (
+from ui_core import (
     DAY_TIME_ART, BEACH_ART, CAVE_ART, VOLCANO_ART,
     UNDERWATER_ART, SPACE_ART, CYBER_CITY_ART, TUNDRA_ART
 )

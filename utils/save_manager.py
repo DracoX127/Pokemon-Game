@@ -3,7 +3,7 @@ import os
 
 SAVE_FILE = "save_game.json"
 
-def save_game(name, pokemon, money, heal_tickets, trophies, inventory, location, badges=None, tower_record=0, pokedex_seen=None, pokedex_caught=None, elite_four_defeated=None, achievements=None, daycare=None):
+def save_game(name, pokemon, money, heal_tickets, trophies, inventory, location, badges=None, tower_record=0, pokedex_seen=None, pokedex_caught=None, elite_four_defeated=None, achievements=None, daycare=None, pvp_rp=1000):
     if badges is None: badges = []
     if pokedex_seen is None: pokedex_seen = set()
     if pokedex_caught is None: pokedex_caught = set()
@@ -24,7 +24,8 @@ def save_game(name, pokemon, money, heal_tickets, trophies, inventory, location,
         "pokedex_caught": list(pokedex_caught),
         "elite_four_defeated": elite_four_defeated,
         "achievements": achievements,
-        "daycare": daycare
+        "daycare": daycare,
+        "pvp_rp": pvp_rp
     }
     try:
         with open(SAVE_FILE, 'w') as f:
@@ -51,6 +52,8 @@ def load_game():
                     data["heal_tickets"] = 50
                 if "daycare" not in data:
                     data["daycare"] = {"slots": [], "steps": 0, "egg_waiting": False}
+                if "pvp_rp" not in data:
+                    data["pvp_rp"] = 1000
                 for pname, pdata in data.get("pokemon", {}).items():
                     if "ability" not in pdata:
                         pdata["ability"] = None

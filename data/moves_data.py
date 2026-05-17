@@ -213,6 +213,19 @@ MOVES = {
 
     # --- Leech Life (Bug) ---
     "Leech Life":   {"type": "Bug",    "power": 80,  "acc": 100, "pp": 10, "category": "Physical", "priority": 0, "effect": {"heal": 0.5}},
+
+    # --- Secret Hybrid Fusion Moves ---
+    "Steam Overload":   {"type": "Fire",     "power": 140, "acc": 95,  "pp": 5,  "category": "Special",  "priority": 0, "effect": {"status": "Burn", "chance": 0.5}},
+    "Chloroflame":      {"type": "Grass",    "power": 135, "acc": 90,  "pp": 5,  "category": "Special",  "priority": 0, "effect": {"status": "Burn", "chance": 0.3}},
+    "Hydro-Shock":      {"type": "Electric", "power": 140, "acc": 95,  "pp": 5,  "category": "Special",  "priority": 0, "effect": {"status": "Paralyze", "chance": 0.5}},
+    "Swamp Entrap":     {"type": "Water",    "power": 130, "acc": 95,  "pp": 5,  "category": "Special",  "priority": 0, "effect": {"trap": True}},
+    "Cosmic Rage":      {"type": "Dragon",   "power": 150, "acc": 90,  "pp": 5,  "category": "Special",  "priority": 0, "effect": {"self": {"dm": 1}}},
+    "Shadow Void":      {"type": "Ghost",    "power": 145, "acc": 95,  "pp": 5,  "category": "Special",  "priority": 0, "effect": {"status": "Sleep", "chance": 0.2}},
+    "Earth Shatter":    {"type": "Rock",     "power": 135, "acc": 90,  "pp": 5,  "category": "Physical", "priority": 0, "effect": {"status": "Flinch", "chance": 0.4}},
+    "Glacial Avalanche":{"type": "Ice",      "power": 140, "acc": 95,  "pp": 5,  "category": "Special",  "priority": 0, "effect": {"status": "Freeze", "chance": 0.2}},
+    "Plasma Bolt":      {"type": "Electric", "power": 140, "acc": 95,  "pp": 5,  "category": "Special",  "priority": 0, "effect": {"status": "Burn", "chance": 0.2}},
+    "Iron Fist":        {"type": "Steel",    "power": 135, "acc": 100, "pp": 5,  "category": "Physical", "priority": 0, "effect": {"status": "Flinch", "chance": 0.3}},
+    "Core Fusion":      {"type": "Normal",   "power": 120, "acc": 100, "pp": 10, "category": "Special",  "priority": 0, "effect": None},
 }
 
 def get_effectiveness(atk_type, def_type):
