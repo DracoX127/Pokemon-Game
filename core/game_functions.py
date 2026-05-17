@@ -1236,7 +1236,8 @@ def run_team_battle(player_team, enemy_team, weather, battle_context):
                    your_stages=player_active.get("stages"), enemy_stages=enemy_active.get("stages"),
                    turn=turn_count, messages=battle_log.get_recent(),
                    your_ability=player_active.get("ability"), your_item=player_active.get("hold_item"),
-                   enemy_ability=enemy_active.get("ability"))
+                   enemy_ability=enemy_active.get("ability"), enemy_item=enemy_active.get("hold_item"),
+                   battle_mode=battle_context.get("mode"))
 
         weather_msg = apply_weather_damage(weather, player_active)
         if weather_msg[0] > 0:
@@ -1246,15 +1247,35 @@ def run_team_battle(player_team, enemy_team, weather, battle_context):
             battle_log.log(weather_msg2[1], BRIGHT_YELLOW)
             
         env_rule = battle_context.get("env_rule")
+        
+        # Environmental rule effects at start of turn
         if env_rule == "Gravity Surge":
-            if "Flying" in player_active.get("type", "Normal"):
-                dmg = max(1, player_active.get("maxhp", 1) // 16)
-                take_damage(player_active, dmg)
-                battle_log.log(f"Gravity Surge crushes {player_active_name}! (-{dmg} HP)", BRIGHT_MAGENTA)
-            if "Flying" in enemy_active.get("type", "Normal"):
-                dmg = max(1, enemy_active.get("maxhp", 1) // 16)
-                take_damage(enemy_active, dmg)
-                battle_log.log(f"Gravity Surge crushes {enemy_active_name}! (-{dmg} HP)", BRIGHT_MAGENTA)
+            for pname, pstats in [(player_active_name, player_active), (enemy_active_name, enemy_active)]:
+                if "Flying" in pstats.get("type", "Normal"):
+                    dmg = max(1, pstats.get("maxhp", 1) // 16)
+                    take_damage(pstats, dmg)
+                    battle_log.log(f"Gravity Surge crushes {pname}! (-{dmg} HP)", BRIGHT_MAGENTA)
+        
+        elif env_rule == "Solar Flare":
+            for pname, pstats in [(player_active_name, player_active), (enemy_active_name, enemy_active)]:
+                if "Water" in pstats.get("type", "Normal"):
+                    dmg = max(1, pstats.get("maxhp", 1) // 20)
+                    take_damage(pstats, dmg)
+                    battle_log.log(f"Solar Flare scorches {pname}! (-{dmg} HP)", BRIGHT_RED)
+        
+        elif env_rule == "Hailstorm":
+            for pname, pstats in [(player_active_name, player_active), (enemy_active_name, enemy_active)]:
+                if "Ice" not in pstats.get("type", "Normal"):
+                    dmg = max(1, pstats.get("maxhp", 1) // 20)
+                    take_damage(pstats, dmg)
+                    battle_log.log(f"Hailstorm batters {pname}! (-{dmg} HP)", BRIGHT_CYAN)
+        
+        elif env_rule == "Grassy Terrain":
+            for pname, pstats in [(player_active_name, player_active), (enemy_active_name, enemy_active)]:
+                if pstats.get("type", "Normal") not in ("Flying", "Levitate"):
+                    heal = max(1, pstats.get("maxhp", 1) // 20)
+                    pstats["hp"] = min(pstats["maxhp"], pstats["hp"] + heal)
+                    battle_log.log(f"Grassy Terrain heals {pname}! (+{heal} HP)", BRIGHT_GREEN)
 
         p_speed = player_active.get("speed", 50) * stage_multiplier(player_active.get("stages", {}), "speed")
         e_speed = enemy_active.get("speed", 50) * stage_multiplier(enemy_active.get("stages", {}), "speed")
@@ -1396,8 +1417,37 @@ def run_team_battle(player_team, enemy_team, weather, battle_context):
                 use_pp(cur_stats, chosen_move)
                 is_crit = random.random() < 0.0625
                 final_damage, effectiveness = calculate_move_damage(chosen_move, cur_stats, opp_stats.get("type", "Normal"), weather, is_crit)
-                if battle_context.get("env_rule") == "Overdrive" and move.get("type", "Normal") == "Electric":
+                
+                # Environmental rule damage modifiers
+                env = battle_context.get("env_rule")
+                move_type = move.get("type", "Normal")
+                
+                if env == "Overdrive" and move_type == "Electric":
                     final_damage = int(final_damage * 1.5)
+                    battle_log.log("Overdrive boosts Electric damage!", BRIGHT_YELLOW)
+                elif env == "Solar Flare" and move_type == "Fire":
+                    final_damage = int(final_damage * 2.0)
+                    battle_log.log("Solar Flare boosts Fire damage!", BRIGHT_YELLOW)
+                elif env == "Misty Terrain" and move_type == "Dragon":
+                    final_damage = int(final_damage * 0.5)
+                    battle_log.log("Misty Terrain weakens Dragon damage!", BRIGHT_YELLOW)
+                elif env == "Psychic Terrain" and move_type == "Psychic":
+                    final_damage = int(final_damage * 1.3)
+                    battle_log.log("Psychic Terrain boosts Psychic damage!", BRIGHT_YELLOW)
+                elif env == "Electric Terrain" and move_type == "Electric":
+                    final_damage = int(final_damage * 1.3)
+                    battle_log.log("Electric Terrain boosts Electric damage!", BRIGHT_YELLOW)
+                elif env == "Grassy Terrain" and move_type == "Grass":
+                    final_damage = int(final_damage * 1.3)
+                    battle_log.log("Grassy Terrain boosts Grass damage!", BRIGHT_YELLOW)
+                elif env == "Hailstorm" and move_type == "Ice":
+                    final_damage = int(final_damage * 1.5)
+                    battle_log.log("Hailstorm boosts Ice damage!", BRIGHT_YELLOW)
+                
+                # Psychic Terrain blocks priority moves
+                if env == "Psychic Terrain" and move.get("priority", 0) > 0:
+                    battle_log.log(f"Psychic Terrain blocks {chosen_move}! Priority moves fail!", BRIGHT_MAGENTA)
+                    final_damage = 0
                 eff_msg = ""
                 if effectiveness > 1.0:
                     eff_msg = f"  {BRIGHT_GREEN}It's super effective!{RESET}"
@@ -1734,3 +1784,336 @@ def run_dungeon_raid(player_team, dungeon_choice, inventory):
     print(f"  {BOLD}{BRIGHT_GREEN}Congratulations! You successfully cleared all rooms in the {dungeon['name']}!{RESET}")
     print()
     return True
+
+
+# ============================================================
+# LEGENDARY BOSS RAID SYSTEM
+# ============================================================
+
+LEGENDARY_BOSSES = {
+    "mewtwo": {
+        "name": "Mewtwo", "type": "Psychic", "hp_mult": 10, "dm_mult": 3,
+        "moves": ["Psychic", "Shadow Ball", "Ice Beam", "Recover"],
+        "ability": "Pressure", "shield_type": "Psychic",
+        "quote": "I am the ultimate Pokémon. You cannot defeat me.",
+        "reward": {"coins": 5000, "trophies": 2000, "item": "Mewtwonite Y"}
+    },
+    "rayquaza": {
+        "name": "Rayquaza", "type": "Dragon", "hp_mult": 12, "dm_mult": 3.5,
+        "moves": ["Dragon Ascent", "Outrage", "Extreme Speed", "Earthquake"],
+        "ability": "Air Lock", "shield_type": "Dragon",
+        "quote": "The sky itself bows to my power!",
+        "reward": {"coins": 6000, "trophies": 2500, "item": "Dragon Fang"}
+    },
+    "giratina": {
+        "name": "Giratina", "type": "Ghost", "hp_mult": 15, "dm_mult": 2.5,
+        "moves": ["Shadow Force", "Dragon Pulse", "Will-O-Wisp", "Destiny Bond"],
+        "ability": "Levitate", "shield_type": "Ghost",
+        "quote": "From the Distortion World, I bring chaos!",
+        "reward": {"coins": 7000, "trophies": 3000, "item": "Griseous Orb"}
+    },
+    "arceus": {
+        "name": "Arceus", "type": "Normal", "hp_mult": 20, "dm_mult": 4,
+        "moves": ["Judgment", "Hyper Beam", "Recover", "Earthquake"],
+        "ability": "Multitype", "shield_type": "Normal",
+        "quote": "I am the Original One. All creation bows before me.",
+        "reward": {"coins": 10000, "trophies": 5000, "item": "Legend Plate"}
+    },
+    "kyogre": {
+        "name": "Kyogre", "type": "Water", "hp_mult": 12, "dm_mult": 3,
+        "moves": ["Origin Pulse", "Thunder", "Ice Beam", "Rest"],
+        "ability": "Drizzle", "shield_type": "Water",
+        "quote": "The seas rise to my command!",
+        "reward": {"coins": 5500, "trophies": 2200, "item": "Blue Orb"}
+    },
+    "groudon": {
+        "name": "Groudon", "type": "Ground", "hp_mult": 12, "dm_mult": 3,
+        "moves": ["Precipice Blades", "Fire Punch", "Earthquake", "Bulk Up"],
+        "ability": "Drought", "shield_type": "Ground",
+        "quote": "The land itself is my weapon!",
+        "reward": {"coins": 5500, "trophies": 2200, "item": "Red Orb"}
+    },
+}
+
+def run_boss_raid(player_team, boss_key, inventory):
+    """
+    Execute a Legendary Boss Raid battle.
+    Boss has 10x+ HP and Elemental Shield that halves non-super-effective damage.
+    """
+    boss = LEGENDARY_BOSSES.get(boss_key)
+    if not boss:
+        print(f"  {BOLD}{BRIGHT_RED}❌ Unknown boss: {boss_key}{RESET}")
+        return False
+    
+    # Build active player team
+    py_index = {}
+    for name, s in player_team.items():
+        if s.get("hp", 0) > 0:
+            py_index[name] = s
+    
+    if not py_index:
+        print(f"  {BOLD}{BRIGHT_RED}❌ No available Pokemon!{RESET}")
+        return False
+    
+    # Calculate boss stats based on player team average level
+    avg_lvl = sum(s.get("lvl", 1) for s in py_index.values()) // len(py_index)
+    boss_lvl = max(avg_lvl + 20, 50)
+    
+    base_hp = boss_lvl * 15
+    base_dm = boss_lvl * 8
+    
+    boss_hp = int(base_hp * boss["hp_mult"])
+    boss_dm = int(base_dm * boss["dm_mult"])
+    boss_maxhp = boss_hp
+    
+    boss_stats = {
+        "hp": boss_hp, "maxhp": boss_maxhp, "dm": boss_dm,
+        "speed": boss_lvl * 2, "type": boss["type"],
+        "moves": boss["moves"], "lvl": boss_lvl,
+        "ability": boss["ability"], "hold_item": None,
+        "stages": {"dm": 0, "speed": 0}, "status": None,
+        "name": boss["name"]
+    }
+    
+    # Boss raid intro
+    clear_screen()
+    print_art(DEFEAT_ART, lambda t: glitch_text(t))
+    fancy_header(f"⚠️ LEGENDARY BOSS RAID ⚠️", emoji="👑", width=55)
+    print()
+    print(f"  {BOLD}{BRIGHT_RED}⚡ A legendary presence appears! ⚡{RESET}")
+    print(f"  {BOLD}{BRIGHT_MAGENTA}{boss['name'].upper()}{RESET} {DIM}(Level {boss_lvl}){RESET}")
+    print(f"  {DIM}\"{boss['quote']}\"{RESET}")
+    print()
+    print(f"  {BOLD}{BRIGHT_YELLOW}⚠️ BOSS MECHANICS:{RESET}")
+    print(f"    • {BRIGHT_RED}10x+ HP{RESET} — This will be a long battle!")
+    print(f"    • {BRIGHT_CYAN}Elemental Shield{RESET} — Non-super-effective moves deal 50% damage")
+    print(f"    • {BRIGHT_GREEN}Phase Transitions{RESET} — Boss changes behavior at 50% and 25% HP")
+    print()
+    
+    # Show player team
+    print(f"  {BOLD}{BRIGHT_GREEN}Your team:{RESET}")
+    for pn, st in py_index.items():
+        hp_pct = int((st['hp'] / st['maxhp']) * 100) if st['maxhp'] > 0 else 0
+        bar_color = BRIGHT_GREEN if hp_pct > 60 else (BRIGHT_YELLOW if hp_pct > 30 else BRIGHT_RED)
+        bar = f"{bar_color}{'█' * (hp_pct // 5)}{DIM}{'░' * (20 - hp_pct // 5)}{RESET}"
+        print(f"    {pn}  {bar} {st['hp']}/{st['maxhp']}")
+    print()
+    
+    ans = crazy_input("Challenge this legendary boss? (y/n)")
+    if ans.lower() != 'y':
+        return False
+    
+    # Start the battle
+    player_active_name = crazy_input("Choose your lead pokemon")
+    while player_active_name not in py_index:
+        player_active_name = crazy_input("Invalid. Choose your lead pokemon")
+    player_active = py_index[player_active_name]
+    player_active["name"] = player_active_name
+    
+    weather = "Clear"
+    turn_count = 0
+    battle_log.clear()
+    battle_state = {"mega_evolved": False, "z_move_used": False, "gigantamax_active": False, "gigantamax_turns": 0, "z_power_active": False}
+    boss_phase = 1  # 1 = full, 2 = 50%, 3 = 25%
+    shield_active = True
+    
+    print()
+    fancy_header(f"BOSS RAID: {boss['name'].upper()}", emoji="👑", width=55)
+    print(f"  {BOLD}{BRIGHT_RED}HP: {boss_hp}/{boss_maxhp}{RESET}")
+    print(f"  {BOLD}{BRIGHT_CYAN}Shield: {BRIGHT_GREEN}ACTIVE{RESET} {DIM}(Super-effective moves bypass shield){RESET}")
+    print()
+    crazy_input("Press Enter to begin the raid!")
+    
+    while boss_hp > 0 and py_index:
+        turn_count += 1
+        battle_log.next_turn()
+        
+        # Check phase transitions
+        hp_ratio = boss_hp / boss_maxhp
+        if hp_ratio <= 0.25 and boss_phase == 2:
+            boss_phase = 3
+            print(f"\n  {BOLD}{BRIGHT_RED}⚡ {boss['name']} enters FRENZY MODE! ⚡{RESET}")
+            print(f"  {DIM}Damage and speed increased!{RESET}")
+            boss_stats["dm"] = int(boss_stats["dm"] * 1.5)
+            boss_stats["speed"] = int(boss_stats["speed"] * 1.3)
+            time.sleep(1)
+        elif hp_ratio <= 0.50 and boss_phase == 1:
+            boss_phase = 2
+            print(f"\n  {BOLD}{BRIGHT_YELLOW}⚡ {boss['name']}'s shield flickers! ⚡{RESET}")
+            print(f"  {DIM}Boss becomes more aggressive!{RESET}")
+            boss_stats["dm"] = int(boss_stats["dm"] * 1.2)
+            time.sleep(1)
+        
+        # Display HUD
+        print()
+        battle_hud(player_active_name, player_active.get("hp", 0), player_active.get("maxhp", 1), player_active.get("dm", 0),
+                   boss["name"], boss_hp, boss_maxhp, boss_stats["dm"],
+                   your_status=player_active.get("status"), enemy_status=boss_stats.get("status"), weather=weather,
+                   your_stages=player_active.get("stages"), enemy_stages=boss_stats.get("stages"),
+                   turn=turn_count, messages=battle_log.get_recent(),
+                   your_ability=player_active.get("ability"), your_item=player_active.get("hold_item"),
+                   enemy_ability=boss_stats.get("ability"), battle_mode="Boss Raid")
+        
+        # Player turn
+        print(f"\n  {BOLD}{BRIGHT_GREEN}{player_active_name}'s turn:{RESET}")
+        print(f"  {BOLD}{BRIGHT_WHITE}1.{RESET} {BRIGHT_CYAN}Fight{RESET}")
+        print(f"  {BOLD}{BRIGHT_WHITE}2.{RESET} {BRIGHT_MAGENTA}Bag{RESET}")
+        print(f"  {BOLD}{BRIGHT_WHITE}3.{RESET} {BRIGHT_YELLOW}Switch{RESET}")
+        action = crazy_input("Action")
+        
+        chosen_move = None
+        if action == "1":
+            chosen_move = select_move_menu(player_active_name, player_active, inventory, battle_state)
+            if not chosen_move:
+                continue
+        elif action == "2":
+            item_success, item_result = use_item_menu(inventory, player_active, player_team, player_active_name)
+            if item_success and item_result:
+                player_active_name = item_result
+                player_active = player_team.get(player_active_name, player_active)
+            continue
+        elif action == "3":
+            available = [n for n in py_index if n != player_active_name and py_index[n].get("hp", 0) > 0]
+            if not available:
+                print(f"  {BOLD}{BRIGHT_RED}No available pokemon to switch!{RESET}")
+                time.sleep(0.5)
+                continue
+            for i, n in enumerate(available):
+                s = py_index[n]
+                print(f"  {BOLD}{BRIGHT_WHITE}{i+1}.{RESET} {n}  HP: {s.get('hp',0)}/{s.get('maxhp',1)}")
+            print(f"  {BOLD}{BRIGHT_WHITE}{len(available)+1}.{RESET} {RED}Cancel{RESET}")
+            sw_choice = crazy_int_input("Select")
+            if 1 <= sw_choice <= len(available):
+                new_name = available[sw_choice - 1]
+                player_active_name = new_name
+                player_active = py_index[new_name]
+                player_active["name"] = new_name
+                reset_stages(player_active)
+                print(f"  {BRIGHT_GREEN}Go, {new_name}!{RESET}")
+            continue
+        else:
+            continue
+        
+        # Execute player move
+        move = MOVES.get(chosen_move, {"type": "Normal", "power": 40, "category": "Physical", "priority": 0})
+        if not has_pp(player_active, chosen_move):
+            print(f"  {BOLD}{BRIGHT_RED}No PP left!{RESET}")
+            continue
+        
+        use_pp(player_active, chosen_move)
+        is_crit = random.random() < 0.0625
+        
+        # Calculate damage with shield mechanic
+        final_damage, effectiveness = calculate_move_damage(chosen_move, player_active, boss["type"], weather, is_crit)
+        
+        # Elemental Shield: halve non-super-effective damage
+        if shield_active and effectiveness <= 1.0:
+            final_damage = int(final_damage * 0.5)
+            if turn_count == 1 or turn_count % 5 == 0:
+                print(f"  {BRIGHT_CYAN}🛡️ Elemental Shield reduces damage!{RESET}")
+        
+        # Super-effective bypasses shield
+        if effectiveness > 1.0:
+            print(f"  {BRIGHT_GREEN}💥 Super-effective! Shield bypassed!{RESET}")
+        
+        if is_crit:
+            final_damage = int(final_damage * 1.5)
+            print(f"  {BRIGHT_YELLOW}💥 Critical hit!{RESET}")
+        
+        boss_hp -= final_damage
+        boss_hp = max(0, boss_hp)
+        
+        animate_attack_sequence(player_active_name, boss["name"], final_damage, is_crit)
+        print(f"  {BOLD}{BRIGHT_RED}{boss['name']} HP: {boss_hp}/{boss_maxhp}{RESET}")
+        
+        if boss_hp <= 0:
+            break
+        
+        # Boss turn
+        print(f"\n  {BOLD}{BRIGHT_RED}{boss['name']}'s turn:{RESET}")
+        time.sleep(0.5)
+        
+        # Boss AI: prefer super-effective moves
+        boss_moves = boss["moves"]
+        chosen_boss_move = random.choice(boss_moves)
+        
+        # Check for super-effective move
+        for m in boss_moves:
+            m_data = MOVES.get(m, {"type": "Normal"})
+            eff = get_effectiveness(m_data.get("type", "Normal"), player_active.get("type", "Normal"))
+            if eff > 1.0:
+                chosen_boss_move = m
+                break
+        
+        boss_move_data = MOVES.get(chosen_boss_move, {"type": "Normal", "power": 40})
+        boss_dmg, _ = calculate_move_damage(chosen_boss_move, boss_stats, player_active.get("type", "Normal"), weather)
+        
+        # Phase 3 frenzy: boss attacks twice
+        if boss_phase == 3 and random.random() < 0.3:
+            boss_dmg = int(boss_dmg * 1.5)
+            print(f"  {BOLD}{BRIGHT_RED}FRENZY! Double attack!{RESET}")
+        
+        animate_enemy_attack_sequence(boss["name"], player_active_name, boss_dmg)
+        take_damage(player_active, boss_dmg)
+        print(f"  {BOLD}{BRIGHT_RED}-{boss_dmg} HP to {player_active_name}!{RESET}")
+        
+        if player_active["hp"] <= 0:
+            print(f"  {BOLD}{BRIGHT_RED}{player_active_name} fainted!{RESET}")
+            del py_index[player_active_name]
+            if py_index:
+                print(f"  {BOLD}{BRIGHT_YELLOW}Choose next pokemon:{RESET}")
+                available = [n for n in py_index if py_index[n].get("hp", 0) > 0]
+                if available:
+                    for i, n in enumerate(available):
+                        s = py_index[n]
+                        print(f"  {BOLD}{BRIGHT_WHITE}{i+1}.{RESET} {n}  HP: {s.get('hp',0)}/{s.get('maxhp',1)}")
+                    sw_choice = crazy_int_input("Select")
+                    if 1 <= sw_choice <= len(available):
+                        new_name = available[sw_choice - 1]
+                        player_active_name = new_name
+                        player_active = py_index[new_name]
+                        player_active["name"] = new_name
+                        reset_stages(player_active)
+                else:
+                    break
+            else:
+                break
+        
+        time.sleep(0.5)
+    
+    # Battle result
+    if boss_hp <= 0:
+        clear_screen()
+        print_art(VICTORY_ROYALE_ART, rainbow_text)
+        victory_celebration(lines=5, width=45)
+        fancy_header(f"🎉 BOSS DEFEATED: {boss['name'].upper()} 🎉", emoji="🏆", width=55)
+        print()
+        
+        reward = boss["reward"]
+        money += reward["coins"]
+        trophies += reward["trophies"]
+        inventory[reward["item"]] = inventory.get(reward["item"], 0) + 1
+        
+        print(f"  {BOLD}{BRIGHT_YELLOW}💰 +{reward['coins']} coins!{RESET}")
+        print(f"  {BOLD}{BRIGHT_CYAN}🏆 +{reward['trophies']} trophies!{RESET}")
+        print(f"  {BOLD}{BRIGHT_GREEN}🎁 Received: {reward['item']}!{RESET}")
+        print()
+        
+        # XP for all participating pokemon
+        for pname in py_index:
+            if pname in player_team:
+                xp_gain = boss_maxhp // 10
+                player_team[pname]["xp"] = player_team[pname].get("xp", 0) + xp_gain
+                print(f"  {BRIGHT_CYAN}{pname} gained {xp_gain} XP!{RESET}")
+        
+        crazy_input("Press Enter to continue")
+        return True
+    else:
+        clear_screen()
+        print_art(DEFEAT_ART, lambda t: gradient_text(t, (255, 0, 0), (80, 0, 0)))
+        defeat_rain(lines=5, width=40)
+        fancy_header("BOSS RAID FAILED", emoji="💀", width=55)
+        print(f"  {BOLD}{BRIGHT_RED}{boss['name']} was too powerful...{RESET}")
+        print(f"  {DIM}Train harder and try again!{RESET}")
+        crazy_input("Press Enter to continue")
+        return False

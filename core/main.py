@@ -676,16 +676,17 @@ try:
         print(f"  {BOLD}{BRIGHT_YELLOW}16.{RESET} 🏡 Daycare & Breeding {DIM}[Level & Breed]{RESET}{egg_notif}")
         print(f"  {BOLD}{BRIGHT_BLUE}17.{RESET} 📶 GTS & Ranked PvP   {DIM}[Online station]{RESET}")
         print(f"  {BOLD}{BRIGHT_MAGENTA}18.{RESET} 🏰 Dungeon Gauntlets  {DIM}[Endurance Gauntlet]{RESET}")
+        print(f"  {BOLD}{BRIGHT_RED}19.{RESET} 👑 Boss Raids          {DIM}[Legendary battles]{RESET}")
         print()
         gym_badges_check = [b for b in badges if any(b == g[1]["badge"] for g in GYM_LEADERS.items())]
         if len(gym_badges_check) >= len(GYM_LEADERS):
             ef_status = f"{len(elite_four_defeated)}/5 beaten"
-            print(f"  {BOLD}{BRIGHT_YELLOW}19.{RESET} 👑 Elite Four          {DIM}[{ef_status}]{RESET}")
+            print(f"  {BOLD}{BRIGHT_YELLOW}20.{RESET} 👑 Elite Four          {DIM}[{ef_status}]{RESET}")
             print()
-        print(f"  {BOLD}{DIM}{'20' if len(gym_badges_check) >= len(GYM_LEADERS) else '19'}.{RESET} 🚪 Save & Leave")
+        print(f"  {BOLD}{DIM}{'21' if len(gym_badges_check) >= len(GYM_LEADERS) else '20'}.{RESET} 🚪 Save & Leave")
         print()
         theme_divider(50)
-        max_option = 20 if len(gym_badges_check) >= len(GYM_LEADERS) else 19
+        max_option = 21 if len(gym_badges_check) >= len(GYM_LEADERS) else 20
         option = crazy_int_input("What do you want to do now")
         print()
 
@@ -755,7 +756,8 @@ try:
                                your_status=your_status, enemy_status=enemy_status, weather=battle_weather,
                                your_stages=pokemon[poke_choice].get("stages"),
                                your_ability=pokemon[poke_choice].get("ability"),
-                               your_item=pokemon[poke_choice].get("hold_item"))
+                               your_item=pokemon[poke_choice].get("hold_item"),
+                               battle_mode="Wild Encounter")
 
                     boption = 0
                     while boption != 4:
@@ -818,7 +820,7 @@ try:
                                        your_status=pokemon[poke_choice].get("status"), enemy_status=enemy_status, weather=battle_weather,
                                        your_stages=pokemon[poke_choice].get("stages"),
                                        your_ability=pokemon[poke_choice].get("ability"),
-                                       your_item=pokemon[poke_choice].get("hold_item"))
+                                       battle_mode="Wild Encounter")
                             if pokemon[poke_choice]["hp"] <= 0:
                                 print_art(DEFEAT_ART, lambda t: gradient_text(t, (255, 0, 0), (80, 0, 0)))
                                 defeat_rain(lines=3, width=35)
@@ -903,7 +905,7 @@ try:
                                        your_status=pokemon[poke_choice].get("status"), enemy_status=enemy_status, weather=battle_weather,
                                        your_stages=pokemon[poke_choice].get("stages"),
                                        your_ability=pokemon[poke_choice].get("ability"),
-                                       your_item=pokemon[poke_choice].get("hold_item"))
+                                       battle_mode="Wild Encounter")
                                         
                             # Gigantamax turns decrement
                             if battle_state.get("gigantamax_active"):
@@ -927,24 +929,70 @@ try:
                             if "Master Ball" in inventory and inventory["Master Ball"] > 0: prob = 100
                             
                             if prob < 100:
+                                # Enhanced Tactical Throw Minigame
+                                hp_ratio = max(0, enemyhp / original_enemyhp) if original_enemyhp > 0 else 1
+                                
+                                # Difficulty scales with remaining HP
+                                if hp_ratio > 0.7:
+                                    time_limit = 1.5
+                                    difficulty = "HARD"
+                                    diff_color = BRIGHT_RED
+                                    words = ["CAPTURE", "POKEBALL", "GOTCHA"]
+                                elif hp_ratio > 0.4:
+                                    time_limit = 2.0
+                                    difficulty = "MEDIUM"
+                                    diff_color = BRIGHT_YELLOW
+                                    words = ["CATCH", "THROW", "NICE"]
+                                else:
+                                    time_limit = 3.0
+                                    difficulty = "EASY"
+                                    diff_color = BRIGHT_GREEN
+                                    words = ["CATCH", "OK", "GO"]
+                                
+                                challenge_word = random.choice(words)
+                                
                                 print(f"\n  {BOLD}{BRIGHT_MAGENTA}⚡ TACTICAL THROW INITIATED! ⚡{RESET}")
-                                print(f"  {DIM}Type 'CATCH' as fast as you can to boost capture rate!{RESET}")
-                                time.sleep(1.0)
+                                print(f"  {DIM}Difficulty: {diff_color}{difficulty}{RESET} | Time Limit: {BOLD}{time_limit:.1f}s{RESET}")
+                                print(f"  {DIM}Type the word as fast as you can!{RESET}")
+                                time.sleep(0.8)
+                                
+                                # Visual countdown
                                 print(f"  {BOLD}{BRIGHT_YELLOW}READY...{RESET}")
-                                time.sleep(0.5)
-                                print(f"  {BOLD}{BRIGHT_GREEN}GO!{RESET}")
+                                time.sleep(0.4)
+                                print(f"  {BOLD}{BRIGHT_YELLOW}SET...{RESET}")
+                                time.sleep(0.4)
+                                print(f"  {BOLD}{BRIGHT_GREEN}GO! → {BOLD}{BRIGHT_CYAN}{challenge_word}{RESET}")
                                 
                                 start_time = time.time()
                                 user_type = input(f"  > ").strip().upper()
                                 elapsed = time.time() - start_time
                                 
-                                if user_type == "CATCH" and elapsed <= 2.5:
-                                    print(f"  {BOLD}{BRIGHT_CYAN}⭐ PERFECT TIMING! ({elapsed:.2f}s) Catch Rate Doubled! ⭐{RESET}")
-                                    prob *= 2
-                                elif user_type == "CATCH":
-                                    print(f"  {DIM}Too slow! ({elapsed:.2f}s) No bonus applied.{RESET}")
+                                # Calculate bonus based on performance
+                                if user_type == challenge_word.upper() and elapsed <= time_limit:
+                                    speed_ratio = elapsed / time_limit
+                                    if speed_ratio <= 0.5:
+                                        # Perfect: under 50% of time limit
+                                        bonus_mult = 2.5
+                                        rating = "⭐ PERFECT! ⭐"
+                                        rating_color = BRIGHT_CYAN
+                                    elif speed_ratio <= 0.75:
+                                        # Great: under 75% of time limit
+                                        bonus_mult = 2.0
+                                        rating = " GREAT!"
+                                        rating_color = BRIGHT_GREEN
+                                    else:
+                                        # Good: within time limit
+                                        bonus_mult = 1.5
+                                        rating = "👍 GOOD!"
+                                        rating_color = BRIGHT_YELLOW
+                                    
+                                    prob = min(100, int(prob * bonus_mult))
+                                    print(f"  {rating_color}{BOLD}{rating} ({elapsed:.2f}s){RESET}")
+                                    print(f"  {BRIGHT_GREEN}Catch rate boosted to {prob}%!{RESET}")
+                                elif user_type == challenge_word.upper():
+                                    print(f"  {DIM}Too slow! ({elapsed:.2f}s > {time_limit:.1f}s) No bonus.{RESET}")
                                 else:
-                                    print(f"  {DIM}Missed! No bonus applied.{RESET}")
+                                    print(f"  {DIM}Wrong word! Expected '{challenge_word}', got '{user_type}'. No bonus.{RESET}")
                             
                             spinner_animation("Throwing ball", duration=1.0)
                             catch_roll = random.randint(1, 100)
@@ -977,7 +1025,7 @@ try:
                                        your_status=pokemon[poke_choice].get("status"), enemy_status=enemy_status, weather=battle_weather,
                                        your_stages=pokemon[poke_choice].get("stages"),
                                        your_ability=pokemon[poke_choice].get("ability"),
-                                       your_item=pokemon[poke_choice].get("hold_item"))
+                                       battle_mode="Wild Encounter")
                                         
                         elif boption == 4:
                             print(f"  {DIM}🏃 Retreating...{RESET}")
@@ -1813,76 +1861,178 @@ try:
             if ans.lower() != 'y':
                 continue
                 
+            # Enhanced Battle Tower with expanded rules and wager system
             print(f"  {DIM}You currently have {money} PokéCoins.{RESET}")
-            wager_str = crazy_input("Wager PokéCoins? (Doubles every 5 rounds, lose all if you faint)").strip()
+            print(f"  {BOLD}{BRIGHT_WHITE}Wager Options:{RESET}")
+            print(f"  {BOLD}{BRIGHT_GREEN}1.{RESET} No Wager  {DIM}[Play for trophies only]{RESET}")
+            print(f"  {BOLD}{BRIGHT_YELLOW}2.{RESET} Small Wager  {DIM}[100 coins → 200 every 5 rounds]{RESET}")
+            print(f"  {BOLD}{BRIGHT_RED}3.{RESET} Big Wager  {DIM}[500 coins → 1000 every 5 rounds]{RESET}")
+            print(f"  {BOLD}{BRIGHT_MAGENTA}4.{RESET} Custom Wager  {DIM}[Enter your amount]{RESET}")
+            wager_choice = crazy_int_input("Choose wager level")
+            
             wager = 0
-            if wager_str.isdigit():
-                wager = int(wager_str)
-                if wager > money:
-                    print(f"  {DIM}You don't have that much! Wager set to 0.{RESET}")
-                    wager = 0
-                elif wager > 0:
+            wager_mult = 2
+            if wager_choice == 1:
+                wager = 0
+            elif wager_choice == 2:
+                if money >= 100:
+                    wager = 100
                     money -= wager
-                    print(f"  {BOLD}{BRIGHT_YELLOW}🎰 Wager locked: {wager} PokéCoins! Let it ride!{RESET}")
-                    time.sleep(1.0)
+                else:
+                    print(f"  {DIM}Not enough coins! Wager set to 0.{RESET}")
+            elif wager_choice == 3:
+                if money >= 500:
+                    wager = 500
+                    money -= wager
+                else:
+                    print(f"  {DIM}Not enough coins! Wager set to 0.{RESET}")
+            elif wager_choice == 4:
+                wager_str = crazy_input("Enter wager amount").strip()
+                if wager_str.isdigit():
+                    wager = int(wager_str)
+                    if wager > money:
+                        print(f"  {DIM}You don't have that much! Wager set to 0.{RESET}")
+                        wager = 0
+                    else:
+                        money -= wager
+            
+            if wager > 0:
+                print(f"  {BOLD}{BRIGHT_YELLOW}🎰 Wager locked: {wager} PokéCoins!{RESET}")
+                time.sleep(0.5)
+            
             tower_round = 0
+            win_streak = 0
+            
+            # Expanded environmental rules
+            env_rules = {
+                "Normal": {"desc": "No special rules.", "icon": "⚪"},
+                "Gravity Surge": {"desc": "Flying-types are grounded and take 5% HP per turn.", "icon": "🌍", "effect": "gravity"},
+                "Overdrive": {"desc": "Electric-type moves deal 1.5x damage.", "icon": "⚡", "effect": "overdrive"},
+                "Trick Room": {"desc": "Slower Pokémon move first.", "icon": "🔄", "effect": "trickroom"},
+                "Vampiric Field": {"desc": "All attacks drain 10% of damage dealt as HP.", "icon": "🩸", "effect": "vampiric"},
+                "Solar Flare": {"desc": "Fire-type moves deal 2x damage. Water-types take 5% HP per turn.", "icon": "☀️", "effect": "solarflare"},
+                "Misty Terrain": {"desc": "Status moves have 50% accuracy. Dragon-type moves deal 0.5x damage.", "icon": "🌸", "effect": "misty"},
+                "Psychic Terrain": {"desc": "Priority moves fail. Psychic-type moves deal 1.3x damage.", "icon": "🔮", "effect": "psychic"},
+                "Electric Terrain": {"desc": "All Pokémon cannot fall asleep. Electric moves deal 1.3x damage.", "icon": "⚡", "effect": "electric"},
+                "Grassy Terrain": {"desc": "Grounded Pokémon heal 5% HP per turn. Grass moves deal 1.3x damage.", "icon": "🌿", "effect": "grassy"},
+                "Hailstorm": {"desc": "Ice-type moves deal 1.5x damage. Non-Ice types take 5% HP per turn.", "icon": "❄️", "effect": "hailstorm"},
+                "Sandstorm": {"desc": "Rock/Ground/Steel types take no sandstorm damage. Others take 5% HP per turn.", "icon": "🌪️", "effect": "sandstorm"},
+            }
+            
             while True:
                 tower_round += 1
+                
+                # Special round modifiers
+                is_boss_round = (tower_round % 10 == 0)
+                is_checkpoint = (tower_round % 5 == 0)
+                
                 num_enemy = min(3, 1 + tower_round // 3)
+                if is_boss_round:
+                    num_enemy = 1  # Boss round = single powerful enemy
+                
                 enemy_team = {}
                 for i in range(num_enemy):
                     level = tower_round * 5 + random.randint(1, 10)
+                    if is_boss_round:
+                        level = int(level * 1.5)  # Boss is 50% stronger
+                    
                     ename, ehp, edm, etyp, emoves, eshiny, espd = get_wild_pokemon(level, location)
                     if eshiny:
                         ehp, edm = int(ehp * 1.3), int(edm * 1.3)
-                    ehp = int(ehp * (1 + tower_round * 0.03))
-                    edm = int(edm * (1 + tower_round * 0.03))
+                    
+                    # Scale with round number
+                    scale = 1 + tower_round * 0.05
+                    if is_boss_round:
+                        scale *= 1.5
+                    
+                    ehp = int(ehp * scale)
+                    edm = int(edm * scale)
+                    espd = int(espd * scale)
+                    
                     enemy_team[ename] = {"hp": ehp, "maxhp": ehp, "dm": edm, "speed": espd, "type": etyp, "moves": emoves, "lvl": level // 10 + 1}
-                env_rules = {
-                    "Normal": None,
-                    "Gravity Surge": "Flying-types are grounded and take damage over time.",
-                    "Overdrive": "Electric-type moves deal 1.5x damage.",
-                    "Trick Room": "Slower Pokémon move first.",
-                    "Vampiric Field": "All attacks drain 10% of damage dealt as HP."
-                }
-                current_rule = random.choice(list(env_rules.keys()))
                 
-                print(f"\n  {BOLD}{BRIGHT_YELLOW}═══ TOWER ROUND {tower_round} ═══{RESET}")
+                # Pick environmental rule (boss rounds always have a rule)
+                if is_boss_round:
+                    rule_keys = [k for k in env_rules if k != "Normal"]
+                    current_rule = random.choice(rule_keys)
+                else:
+                    current_rule = random.choice(list(env_rules.keys()))
+                
+                rule_data = env_rules[current_rule]
+                
+                # Display round info
+                print(f"\n  {BOLD}{BRIGHT_YELLOW}{'═' * 40}{RESET}")
+                if is_boss_round:
+                    print(f"  {BOLD}{BRIGHT_RED}👑 BOSS ROUND {tower_round} 👑{RESET}")
+                else:
+                    print(f"  {BOLD}{BRIGHT_YELLOW}═══ TOWER ROUND {tower_round} ═══{RESET}")
+                
                 if current_rule != "Normal":
-                    print(f"  {BOLD}{BRIGHT_MAGENTA}🌌 ENVIRONMENTAL RULE: {current_rule} 🌌{RESET}")
-                    print(f"  {DIM}{env_rules[current_rule]}{RESET}")
+                    print(f"  {rule_data['icon']} {BOLD}{BRIGHT_MAGENTA}RULE: {current_rule}{RESET}")
+                    print(f"  {DIM}{rule_data['desc']}{RESET}")
+                
+                if is_checkpoint and wager > 0:
+                    print(f"  {BOLD}{BRIGHT_GREEN}💰 Checkpoint: Wager doubles on victory!{RESET}")
+                
                 print(f"  {BOLD}{BRIGHT_RED}Enemy team:{RESET}")
                 for pn, st in enemy_team.items():
-                    print(f"    {pn}  Lvl {st['lvl']}  {st['type']}  HP:{st['hp']} DM:{st['dm']}")
+                    boss_tag = " 👑" if is_boss_round else ""
+                    print(f"    {pn}{boss_tag}  Lvl {st['lvl']}  {st['type']}  HP:{st['hp']} DM:{st['dm']}")
                 print()
+                
                 tower_weather = get_random_weather()
                 battle_context = {"mode": "Tower", "inventory": inventory, "player_team": pokemon, "env_rule": current_rule}
                 won, xp_dict, money_gained = run_team_battle(pokemon, enemy_team, tower_weather, battle_context)
+                
                 if not won:
                     print_art(DEFEAT_ART, lambda t: gradient_text(t, (255, 0, 0), (80, 0, 0)))
                     defeat_rain(lines=3, width=35)
                     print(f"  {BOLD}{BRIGHT_RED}💀 Tower run ended at Round {tower_round}!{RESET}")
+                    print(f"  {BOLD}Win Streak: {win_streak}{RESET}")
                     if wager > 0:
-                        print(f"  {DIM}You lost your accumulated wager of {wager} PokéCoins.{RESET}")
-                    break
+                        print(f"  {DIM}Lost wager of {wager} PokéCoins.{RESET}")
                     
-                if tower_round % 5 == 0 and wager > 0:
-                    payout = wager * 2
+                    # Streak bonus consolation
+                    if win_streak >= 5:
+                        streak_bonus = win_streak * 20
+                        trophies += streak_bonus
+                        print(f"  {BRIGHT_YELLOW}🔥 Streak bonus: +{streak_bonus} trophies!{RESET}")
+                    break
+                
+                win_streak += 1
+                
+                # Checkpoint wager payout
+                if is_checkpoint and wager > 0:
+                    payout = wager * wager_mult
                     money += payout
-                    print(f"\n  {BOLD}{BRIGHT_YELLOW}🎰 TOWER CHECKPOINT REACHED! 🎰{RESET}")
+                    print(f"\n  {BOLD}{BRIGHT_YELLOW}🎰 CHECKPOINT REACHED! 🎰{RESET}")
                     print(f"  {BOLD}{BRIGHT_GREEN}Wager payout: +{payout} PokéCoins!{RESET}")
                     wager = payout
-                    time.sleep(1.5)
+                
+                # Streak bonuses
+                if win_streak == 5:
+                    print(f"  {BOLD}{BRIGHT_CYAN}🔥 5 Win Streak! +100 trophies!{RESET}")
+                    trophies += 100
+                elif win_streak == 10:
+                    print(f"  {BOLD}{BRIGHT_MAGENTA}🔥🔥 10 Win Streak! +300 trophies!{RESET}")
+                    trophies += 300
+                elif win_streak == 20:
+                    print(f"  {BOLD}{BRIGHT_RED}🔥🔥🔥 20 Win Streak! +1000 trophies!{RESET}")
+                    trophies += 1000
+                
                 trophies += 50 * tower_round
                 if tower_round > tower_record:
                     tower_record = tower_round
-                print(f"  {BOLD}{BRIGHT_GREEN}✅ Round {tower_round} cleared!  Record: {tower_record}{RESET}")
+                
+                print(f"  {BOLD}{BRIGHT_GREEN}✅ Round {tower_round} cleared!  Record: {tower_record}  Streak: {win_streak}{RESET}")
                 for qid, q in quest_manager.hook_tower(tower_round):
                     print(f"  {BRIGHT_YELLOW}🎉 Quest #{qid} complete! {q['reward_desc']}!{RESET}")
+                
                 ans = crazy_input("Continue to next round? (y/n)")
                 if ans.lower() != 'y': break
+            
             print(f"\n  {BOLD}{BRIGHT_YELLOW}🗼 Tower Run ended at Round {tower_round}{RESET}")
-            print(f"  {BOLD}{BRIGHT_CYAN}🏆 Record: {tower_record}{RESET}")
+            print(f"  {BOLD}{BRIGHT_CYAN}🏆 Record: {tower_record}  |  Win Streak: {win_streak}{RESET}")
             crazy_input("Press Enter to continue")
 
         # ══════════════════════════════════════
@@ -2051,41 +2201,179 @@ try:
             crazy_input("Press Enter to continue")
 
         # ══════════════════════════════════════
-        # OPTION 12: POKEDEX
+        # OPTION 12: POKEDEX + COSMETICS SHOP
         # ══════════════════════════════════════
         if option == 13:
-            clear_screen()
-            wipe_transition(width=50)
-            fancy_header("POKÉDEX", emoji="📖", width=50)
-            total = len(pokedex_seen) if pokedex_seen else 1
-            caught_pct = int((len(pokedex_caught) / total) * 100) if total > 0 else 0
-            pct_bar = f"{BRIGHT_GREEN}{'█' * (caught_pct // 2)}{DIM}{'░' * (50 - caught_pct // 2)}{RESET}"
-            print(f"  {BOLD}{BRIGHT_WHITE}Progress: {pct_bar} {caught_pct}%{RESET}")
-            print(f"  {BRIGHT_CYAN}📖 Seen: {len(pokedex_seen)}  |  🎯 Caught: {len(pokedex_caught)}{RESET}")
-            print()
-            if pokedex_caught:
-                print(f"  {BOLD}{BRIGHT_GREEN}═══ CAUGHT ({len(pokedex_caught)}) ═══{RESET}")
-                caught_list = sorted(pokedex_caught)
-                for i in range(0, len(caught_list), 3):
-                    row = caught_list[i:i+3]
-                    row_str = "  ".join([f"{BRIGHT_GREEN}✅{RESET} {p.capitalize()}" for p in row])
-                    print(f"  {row_str}")
-            if pokedex_seen - pokedex_caught:
-                print(f"\n  {BOLD}{BRIGHT_YELLOW}═══ SEEN ONLY ({len(pokedex_seen - pokedex_caught)}) ═══{RESET}")
-                seen_list = sorted(pokedex_seen - pokedex_caught)
-                for i in range(0, len(seen_list), 3):
-                    row = seen_list[i:i+3]
-                    row_str = "  ".join([f"{BRIGHT_YELLOW}👁️{RESET} {p.capitalize()}" for p in row])
-                    print(f"  {row_str}")
-            if len(pokedex_caught) >= 10 and "Pokedex Pro" not in badges:
-                print(f"\n  {BOLD}{BRIGHT_YELLOW}🏅 Milestone: Caught 10 Pokemon! +200 coins{RESET}")
-                money += 200
-                badges.append("Pokedex Pro")
-            if len(pokedex_caught) >= 30 and "Pokemon Master" not in badges:
-                print(f"\n  {BOLD}{BRIGHT_YELLOW}🏅 Milestone: Caught 30 Pokemon! +500 coins{RESET}")
-                money += 500
-                badges.append("Pokemon Master")
-            crazy_input("Press Enter to continue")
+            while True:
+                clear_screen()
+                wipe_transition(width=50)
+                fancy_header("POKÉDEX & SHOP", emoji="📖", width=55)
+                total = len(pokedex_seen) if pokedex_seen else 1
+                caught_pct = int((len(pokedex_caught) / total) * 100) if total > 0 else 0
+                pct_bar = f"{BRIGHT_GREEN}{'█' * (caught_pct // 2)}{DIM}{'░' * (50 - caught_pct // 2)}{RESET}"
+                print(f"  {BOLD}{BRIGHT_WHITE}Progress: {pct_bar} {caught_pct}%{RESET}")
+                print(f"  {BRIGHT_CYAN}📖 Seen: {len(pokedex_seen)}  |  🎯 Caught: {len(pokedex_caught)}{RESET}")
+                print()
+                print(f"  {BOLD}{BRIGHT_GREEN}1.{RESET} 📖 View Pokédex")
+                print(f"  {BOLD}{BRIGHT_YELLOW}2.{RESET} 📊 Type Effectiveness Table")
+                print(f"  {BOLD}{BRIGHT_MAGENTA}3.{RESET} 🎨 Cosmetics Shop")
+                print(f"  {BOLD}{BRIGHT_CYAN}4.{RESET} 🔍 Search Pokémon")
+                print(f"  {BOLD}{DIM}Q.{RESET} Back")
+                print()
+                theme_divider(50)
+                pdx_opt = crazy_input("Choose").strip().lower()
+                
+                if pdx_opt == "1":
+                    clear_screen()
+                    fancy_header("POKÉDEX", emoji="📖", width=55)
+                    if pokedex_caught:
+                        print(f"  {BOLD}{BRIGHT_GREEN}═══ CAUGHT ({len(pokedex_caught)}) ═══{RESET}")
+                        caught_list = sorted(pokedex_caught)
+                        for i in range(0, len(caught_list), 3):
+                            row = caught_list[i:i+3]
+                            row_str = "  ".join([f"{BRIGHT_GREEN}✅{RESET} {p.capitalize()}" for p in row])
+                            print(f"  {row_str}")
+                    if pokedex_seen - pokedex_caught:
+                        print(f"\n  {BOLD}{BRIGHT_YELLOW}═══ SEEN ONLY ({len(pokedex_seen - pokedex_caught)}) ═══{RESET}")
+                        seen_list = sorted(pokedex_seen - pokedex_caught)
+                        for i in range(0, len(seen_list), 3):
+                            row = seen_list[i:i+3]
+                            row_str = "  ".join([f"{BRIGHT_YELLOW}👁️{RESET} {p.capitalize()}" for p in row])
+                            print(f"  {row_str}")
+                    if len(pokedex_caught) >= 10 and "Pokedex Pro" not in badges:
+                        print(f"\n  {BOLD}{BRIGHT_YELLOW}🏅 Milestone: Caught 10 Pokemon! +200 coins{RESET}")
+                        money += 200
+                        badges.append("Pokedex Pro")
+                    if len(pokedex_caught) >= 30 and "Pokemon Master" not in badges:
+                        print(f"\n  {BOLD}{BRIGHT_YELLOW}🏅 Milestone: Caught 30 Pokemon! +500 coins{RESET}")
+                        money += 500
+                        badges.append("Pokemon Master")
+                    crazy_input("Press Enter to continue")
+                
+                elif pdx_opt == "2":
+                    clear_screen()
+                    fancy_header("TYPE EFFECTIVENESS TABLE", emoji="📊", width=55)
+                    print(f"  {DIM}Shows damage multipliers for each attacking type vs defending type{RESET}")
+                    print(f"  {BRIGHT_GREEN}2.0x{RESET} = Super Effective | {BRIGHT_RED}0.5x{RESET} = Not Very Effective | {DIM}0x{RESET} = Immune")
+                    print()
+                    
+                    types = ["Normal", "Fire", "Water", "Grass", "Electric", "Ice", "Fighting", "Poison", "Ground", "Flying", "Psychic", "Bug", "Rock", "Ghost", "Dragon", "Dark", "Steel", "Fairy"]
+                    
+                    # Header row
+                    header = f"  {'':10}"
+                    for t in types[:9]:
+                        header += f"{t[:4]:5}"
+                    print(header)
+                    print(f"  {'─' * 55}")
+                    
+                    # Data rows (first half)
+                    for atk_type in types[:9]:
+                        row = f"  {atk_type[:8]:10}"
+                        for def_type in types[:9]:
+                            eff = get_effectiveness(atk_type, def_type)
+                            if eff == 2.0: cell = f"{BRIGHT_GREEN}2.0 {RESET}"
+                            elif eff == 0.5: cell = f"{BRIGHT_RED}0.5 {RESET}"
+                            elif eff == 0.0: cell = f"{DIM}0.0 {RESET}"
+                            elif eff == 4.0: cell = f"{BRIGHT_GREEN}4.0 {RESET}"
+                            elif eff == 0.25: cell = f"{BRIGHT_RED}0.25{RESET}"
+                            else: cell = f"1.0 "
+                            row += f"{cell}"
+                        print(row)
+                    
+                    print()
+                    print(f"  {'─' * 55}")
+                    # Header row for second half
+                    header2 = f"  {'':10}"
+                    for t in types[9:]:
+                        header2 += f"{t[:4]:5}"
+                    print(header2)
+                    print(f"  {'─' * 55}")
+                    
+                    # Data rows (second half)
+                    for atk_type in types[:9]:
+                        row = f"  {atk_type[:8]:10}"
+                        for def_type in types[9:]:
+                            eff = get_effectiveness(atk_type, def_type)
+                            if eff == 2.0: cell = f"{BRIGHT_GREEN}2.0 {RESET}"
+                            elif eff == 0.5: cell = f"{BRIGHT_RED}0.5 {RESET}"
+                            elif eff == 0.0: cell = f"{DIM}0.0 {RESET}"
+                            elif eff == 4.0: cell = f"{BRIGHT_GREEN}4.0 {RESET}"
+                            elif eff == 0.25: cell = f"{BRIGHT_RED}0.25{RESET}"
+                            else: cell = f"1.0 "
+                            row += f"{cell}"
+                        print(row)
+                    
+                    print()
+                    crazy_input("Press Enter to continue")
+                
+                elif pdx_opt == "3":
+                    while True:
+                        clear_screen()
+                        fancy_header("COSMETICS SHOP", emoji="🎨", width=55)
+                        print(f"  {BOLD}{BRIGHT_WHITE}💰 Coins: {money}{RESET}")
+                        print()
+                        cosmetics = [
+                            {"name": "Golden Border", "desc": "Gold ANSI borders for all menus", "price": 1000, "id": "golden_border"},
+                            {"name": "Neon Glow", "desc": "Neon-colored text effects", "price": 1500, "id": "neon_glow"},
+                            {"name": "Matrix Theme", "desc": "Green-on-black terminal theme", "price": 2000, "id": "matrix_theme"},
+                            {"name": "Rainbow HP Bars", "desc": "HP bars cycle through rainbow colors", "price": 800, "id": "rainbow_hp"},
+                            {"name": "Shiny Badge", "desc": "Display a ✨ badge next to your name", "price": 500, "id": "shiny_badge"},
+                            {"name": "Champion Title", "desc": "Title 'Champion' displayed in menus", "price": 5000, "id": "champion_title"},
+                            {"name": "Animated Background", "desc": "Subtle animated particles in menus", "price": 3000, "id": "anim_bg"},
+                            {"name": "Retro CRT", "desc": "CRT scanline effect on all screens", "price": 1200, "id": "retro_crt"},
+                        ]
+                        
+                        for i, c in enumerate(cosmetics, 1):
+                            owned = " ✅" if c["id"] in badges else ""
+                            print(f"  {BOLD}{BRIGHT_WHITE}{i}.{RESET} {BRIGHT_CYAN}{c['name']}{RESET} {DIM}- {c['desc']}{RESET}")
+                            print(f"     {BRIGHT_YELLOW}{c['price']} coins{RESET}{owned}")
+                        print(f"  {BOLD}{BRIGHT_WHITE}{len(cosmetics)+1}.{RESET} {RED}Back{RESET}")
+                        print()
+                        
+                        shop_choice = crazy_int_input("Select item")
+                        if 1 <= shop_choice <= len(cosmetics):
+                            item = cosmetics[shop_choice - 1]
+                            if item["id"] in badges:
+                                print(f"  {BRIGHT_YELLOW}You already own this!{RESET}")
+                            elif money >= item["price"]:
+                                money -= item["price"]
+                                badges.append(item["id"])
+                                print(f"  {BRIGHT_GREEN}✅ Purchased {item['name']}!{RESET}")
+                            else:
+                                print(f"  {BRIGHT_RED}❌ Not enough coins! Need {item['price']}, have {money}{RESET}")
+                            crazy_input("Press Enter to continue")
+                        else:
+                            break
+                
+                elif pdx_opt == "4":
+                    clear_screen()
+                    fancy_header("POKÉMON SEARCH", emoji="🔍", width=55)
+                    query = crazy_input("Search term (name or type)").strip().lower()
+                    if not query:
+                        continue
+                    
+                    results = []
+                    all_dex = {}
+                    for dex in [weak_pokemon, moderately_strong_pokemon, strong_pokemon, ultra_strong_pokemon]:
+                        all_dex.update(dex)
+                    
+                    for name, data in all_dex.items():
+                        if query in name.lower() or query in data.get("type", "").lower():
+                            results.append((name, data))
+                    
+                    if results:
+                        print(f"\n  {BOLD}{BRIGHT_GREEN}Found {len(results)} results:{RESET}")
+                        for name, data in results[:20]:
+                            caught = "✅" if name in pokedex_caught else ("👁️" if name in pokedex_seen else "❓")
+                            print(f"  {caught} {BOLD}{name.capitalize():15}{RESET} {data.get('type','?'):8} HP:{data.get('hp','?'):3} DM:{data.get('dm','?'):3}")
+                        if len(results) > 20:
+                            print(f"  {DIM}...and {len(results) - 20} more{RESET}")
+                    else:
+                        print(f"  {BRIGHT_RED}No results found for '{query}'{RESET}")
+                    crazy_input("Press Enter to continue")
+                
+                elif pdx_opt == "q":
+                    break
 
         # ══════════════════════════════════════
         # OPTION 13: BUG HUNT
@@ -2398,55 +2686,169 @@ try:
                     clear_screen()
                     fancy_header("RANKED MATCHMAKING", emoji="🏟️", width=55)
                     print(f"  {DIM}Broadcasting battle request to GTS servers...{RESET}")
-                    spinner_animation("Searching for online opponents...", duration=5.0)
-                    print(f"  {BOLD}{BRIGHT_YELLOW}⚠️  No live players found at your skill level.{RESET}")
-                    print(f"  {DIM}Downloading Ghost AI Trainer Profile...{RESET}")
-                    time.sleep(1.0)
                     
-                    opponents = [
-                        {"name": "Red", "tier": "Champion", "mons": ["Charizard", "Mewtwo", "Venusaur", "Blastoise", "Pikachu", "Snorlax"]},
-                        {"name": "Cynthia", "tier": "Master", "mons": ["Garchomp", "Milotic", "Lucario", "Togekiss", "Roserade", "Spiritomb"]},
-                        {"name": "Steven", "tier": "Gold", "mons": ["Metagross", "Aggron", "Skarmory", "Claydol", "Cradily", "Armaldo"]},
-                        {"name": "Blue", "tier": "Silver", "mons": ["Pidgeot", "Alakazam", "Rhydon", "Exeggutor", "Arcanine", "Gyarados"]},
-                        {"name": "Youngster Joey", "tier": "Bronze", "mons": ["Rattata", "Raticate", "Furret", "Bidoof", "Zigzagoon", "Sentret"]}
-                    ]
-                    if pvp_rp >= 2200:
-                        opp_data = random.choice([o for o in opponents if o["tier"] in ["Champion", "Master"]])
-                    elif pvp_rp >= 1400:
-                        opp_data = random.choice([o for o in opponents if o["tier"] in ["Gold", "Silver"]])
-                    else:
-                        opp_data = opponents[-1]
+                    # Dynamic queue time based on RP (higher RP = longer queue)
+                    queue_time = 2.0 + (pvp_rp - 1000) / 1000.0
+                    queue_time = min(queue_time, 6.0)
+                    spinner_animation("Searching for online opponents...", duration=queue_time)
+                    
+                    # Simulate matchmaking phases
+                    print(f"  {DIM}Checking player pool...{RESET}")
+                    time.sleep(0.5)
+                    print(f"  {DIM}Analyzing skill brackets...{RESET}")
+                    time.sleep(0.5)
+                    
+                    # Expanded Ghost AI trainer database with proper teams
+                    ghost_trainers = [
+                        # BRONZE TIER (1000-1399 RP)
+                        {"name": "Youngster Joey", "tier": "Bronze", "rp_range": (1000, 1199), "persona": "Hyper-Offense",
+                         "mons": [{"name": "rattata", "type": "Normal", "moves": ["Quick Attack", "Tackle", "Hyper Fang"]},
+                                  {"name": "raticate", "type": "Normal", "moves": ["Hyper Fang", "Quick Attack", "Pursuit"]},
+                                  {"name": "furret", "type": "Normal", "moves": ["Quick Attack", "Slam", "Hyper Fang"]}]},
+                        {"name": "Lass Carrie", "tier": "Bronze", "rp_range": (1000, 1299), "persona": "Support",
+                         "mons": [{"name": "clefairy", "type": "Fairy", "moves": ["Pound", "Double Slap", "Metronome"]},
+                                  {"name": "jigglypuff", "type": "Normal", "moves": ["Pound", "Sing", "Double Slap"]},
+                                  {"name": "skitty", "type": "Normal", "moves": ["Tackle", "Growl", "Assist"]}]},
+                        {"name": "Bug Catcher Don", "tier": "Bronze", "rp_range": (1000, 1199), "persona": "Trickster",
+                         "mons": [{"name": "caterpie", "type": "Bug", "moves": ["Tackle", "Bug Bite", "String Shot"]},
+                                  {"name": "weedle", "type": "Bug", "moves": ["Poison Sting", "Bug Bite", "String Shot"]},
+                                  {"name": "paras", "type": "Bug", "moves": ["Scratch", "Bug Bite", "Spore"]}]},
                         
+                        # SILVER TIER (1400-1799 RP)
+                        {"name": "Cooltrainer Nick", "tier": "Silver", "rp_range": (1400, 1699), "persona": "Tactical",
+                         "mons": [{"name": "pidgeot", "type": "Flying", "moves": ["Wing Attack", "Quick Attack", "Steel Wing"]},
+                                  {"name": "alakazam", "type": "Psychic", "moves": ["Psychic", "Shadow Ball", "Recover"]},
+                                  {"name": "arcanine", "type": "Fire", "moves": ["Flamethrower", "Extreme Speed", "Crunch"]},
+                                  {"name": "gyarados", "type": "Water", "moves": ["Waterfall", "Crunch", "Earthquake"]}]},
+                        {"name": "Beauty Victoria", "tier": "Silver", "rp_range": (1400, 1699), "persona": "Staller",
+                         "mons": [{"name": "milotic", "type": "Water", "moves": ["Surf", "Ice Beam", "Recover"]},
+                                  {"name": "gardevoir", "type": "Psychic", "moves": ["Psychic", "Thunderbolt", "Calm Mind"]},
+                                  {"name": "roselia", "type": "Grass", "moves": ["Giga Drain", "Sludge Bomb", "Sleep Powder"]}]},
+                        {"name": "Ace Trainer Jake", "tier": "Silver", "rp_range": (1500, 1799), "persona": "Hyper-Offense",
+                         "mons": [{"name": "salamence", "type": "Dragon", "moves": ["Dragon Claw", "Flamethrower", "Earthquake"]},
+                                  {"name": "metagross", "type": "Steel", "moves": ["Meteor Mash", "Earthquake", "Bullet Punch"]},
+                                  {"name": "tyranitar", "type": "Rock", "moves": ["Stone Edge", "Earthquake", "Crunch"]}]},
+                        
+                        # GOLD TIER (1800-2199 RP)
+                        {"name": "Veteran Edgar", "tier": "Gold", "rp_range": (1800, 2099), "persona": "Tactical",
+                         "mons": [{"name": "garchomp", "type": "Dragon", "moves": ["Dragon Claw", "Earthquake", "Stone Edge", "Fire Fang"]},
+                                  {"name": "lucario", "type": "Fighting", "moves": ["Close Combat", "Extreme Speed", "Shadow Ball"]},
+                                  {"name": "togekiss", "type": "Fairy", "moves": ["Air Slash", "Flamethrower", "Aura Sphere"]},
+                                  {"name": "roserade", "type": "Grass", "moves": ["Sludge Bomb", "Giga Drain", "Sleep Powder"]}]},
+                        {"name": "Pokémon Breeder Lydia", "tier": "Gold", "rp_range": (1800, 2099), "persona": "Support",
+                         "mons": [{"name": "blissey", "type": "Normal", "moves": ["Seismic Toss", "Softboiled", "Thunder Wave"]},
+                                  {"name": "chansey", "type": "Normal", "moves": ["Seismic Toss", "Softboiled", "Heal Bell"]},
+                                  {"name": "clefable", "type": "Fairy", "moves": ["Moonblast", "Thunder Wave", "Softboiled"]}]},
+                        {"name": "Ace Trainer Maya", "tier": "Gold", "rp_range": (1900, 2199), "persona": "Bully",
+                         "mons": [{"name": "dragonite", "type": "Dragon", "moves": ["Outrage", "Hurricane", "Fire Punch"]},
+                                  {"name": "hydreigon", "type": "Dark", "moves": ["Dragon Pulse", "Dark Pulse", "Flamethrower"]},
+                                  {"name": "goodra", "type": "Dragon", "moves": ["Dragon Pulse", "Sludge Wave", "Thunderbolt"]}]},
+                        
+                        # MASTER TIER (2200-2499 RP)
+                        {"name": "Cynthia", "tier": "Master", "rp_range": (2200, 2399), "persona": "Tactical",
+                         "mons": [{"name": "garchomp", "type": "Dragon", "moves": ["Dragon Claw", "Earthquake", "Stone Edge", "Fire Fang"]},
+                                  {"name": "milotic", "type": "Water", "moves": ["Surf", "Ice Beam", "Recover", "Mirror Coat"]},
+                                  {"name": "lucario", "type": "Fighting", "moves": ["Close Combat", "Extreme Speed", "Shadow Ball", "Swords Dance"]},
+                                  {"name": "togekiss", "type": "Fairy", "moves": ["Air Slash", "Flamethrower", "Aura Sphere", "Nasty Plot"]},
+                                  {"name": "roserade", "type": "Grass", "moves": ["Sludge Bomb", "Giga Drain", "Sleep Powder", "Spikes"]},
+                                  {"name": "spiritomb", "type": "Ghost", "moves": ["Shadow Ball", "Dark Pulse", "Will-O-Wisp", "Pain Split"]}]},
+                        {"name": "Steven Stone", "tier": "Master", "rp_range": (2200, 2499), "persona": "Staller",
+                         "mons": [{"name": "metagross", "type": "Steel", "moves": ["Meteor Mash", "Earthquake", "Bullet Punch", "Agility"]},
+                                  {"name": "aggron", "type": "Steel", "moves": ["Iron Head", "Earthquake", "Stone Edge", "Stealth Rock"]},
+                                  {"name": "skarmory", "type": "Steel", "moves": ["Brave Bird", "Roost", "Spikes", "Whirlwind"]},
+                                  {"name": "cradily", "type": "Rock", "moves": ["Giga Drain", "Stone Edge", "Recover", "Stealth Rock"]},
+                                  {"name": "armaldo", "type": "Rock", "moves": ["X-Scissor", "Stone Edge", "Earthquake", "Swords Dance"]}]},
+                        
+                        # CHAMPION TIER (2500+ RP)
+                        {"name": "Red", "tier": "Champion", "rp_range": (2500, 9999), "persona": "Hyper-Offense",
+                         "mons": [{"name": "charizard", "type": "Fire", "moves": ["Flamethrower", "Air Slash", "Dragon Pulse", "Solar Beam"]},
+                                  {"name": "pikachu", "type": "Electric", "moves": ["Thunderbolt", "Quick Attack", "Iron Tail", "Volt Tackle"]},
+                                  {"name": "snorlax", "type": "Normal", "moves": ["Body Slam", "Earthquake", "Crunch", "Rest"]},
+                                  {"name": "venusaur", "type": "Grass", "moves": ["Giga Drain", "Sludge Bomb", "Sleep Powder", "Swords Dance"]},
+                                  {"name": "blastoise", "type": "Water", "moves": ["Surf", "Ice Beam", "Dark Pulse", "Rapid Spin"]},
+                                  {"name": "mewtwo", "type": "Psychic", "moves": ["Psychic", "Shadow Ball", "Ice Beam", "Recover"]}]},
+                        {"name": "Blue Oak", "tier": "Champion", "rp_range": (2500, 9999), "persona": "Bully",
+                         "mons": [{"name": "alakazam", "type": "Psychic", "moves": ["Psychic", "Shadow Ball", "Focus Blast", "Calm Mind"]},
+                                  {"name": "gyarados", "type": "Water", "moves": ["Waterfall", "Earthquake", "Dragon Dance", "Ice Fang"]},
+                                  {"name": "arcanine", "type": "Fire", "moves": ["Flare Blitz", "Extreme Speed", "Crunch", "Morning Sun"]},
+                                  {"name": "exeggutor", "type": "Grass", "moves": ["Psychic", "Giga Drain", "Sleep Powder", "Trick Room"]},
+                                  {"name": "rhydon", "type": "Ground", "moves": ["Earthquake", "Stone Edge", "Megahorn", "Swords Dance"]},
+                                  {"name": "pidgeot", "type": "Flying", "moves": ["Hurricane", "Heat Wave", "U-turn", "Roost"]}]},
+                    ]
+                    
+                    # Find opponents in player's RP range
+                    eligible = [t for t in ghost_trainers if t["rp_range"][0] <= pvp_rp <= t["rp_range"][1]]
+                    if not eligible:
+                        # Fallback to closest tier
+                        if pvp_rp < 1400:
+                            eligible = [t for t in ghost_trainers if t["tier"] == "Bronze"]
+                        elif pvp_rp < 1800:
+                            eligible = [t for t in ghost_trainers if t["tier"] == "Silver"]
+                        elif pvp_rp < 2200:
+                            eligible = [t for t in ghost_trainers if t["tier"] == "Gold"]
+                        elif pvp_rp < 2500:
+                            eligible = [t for t in ghost_trainers if t["tier"] == "Master"]
+                        else:
+                            eligible = [t for t in ghost_trainers if t["tier"] == "Champion"]
+                    
+                    opp_data = random.choice(eligible)
                     opp_name = opp_data["name"]
                     opp_tier = opp_data["tier"]
+                    opp_persona = opp_data["persona"]
                     
-                    print(f"\n  {BOLD}{BRIGHT_GREEN}⚔️ Match Found! ⚔️{RESET}")
+                    print(f"  {BOLD}{BRIGHT_GREEN}⚔️ Match Found! ⚔️{RESET}")
                     print(f"  {BOLD}Opponent:{RESET} {BRIGHT_CYAN}{opp_name}{RESET} ({BRIGHT_RED}{opp_tier} Tier{RESET})")
+                    print(f"  {DIM}AI Persona: {opp_persona}{RESET}")
                     print()
                     ans = crazy_input("Accept ranked match? (y/n)")
                     if ans.lower() != 'y': continue
                     
+                    # Calculate enemy level based on RP
                     enemy_lvl = int(max(5, (pvp_rp - 500) // 15))
+                    
+                    # Build opponent team with proper types and moves
                     opp_team = {}
-                    for mon in opp_data["mons"]:
-                        opp_team[mon.lower()] = make_pokemon(int(enemy_lvl * 12), int(enemy_lvl * 7), "Normal", ["Tackle", "Swift"], speed=int(enemy_lvl * 1.5))
-                        opp_team[mon.lower()]["lvl"] = enemy_lvl
+                    for mon_data in opp_data["mons"]:
+                        mon_name = mon_data["name"]
+                        mon_type = mon_data["type"]
+                        mon_moves = mon_data["moves"]
                         
+                        # Scale stats based on level and tier
+                        tier_mult = {"Bronze": 0.6, "Silver": 0.8, "Gold": 1.0, "Master": 1.2, "Champion": 1.5}
+                        mult = tier_mult.get(opp_tier, 1.0)
+                        
+                        base_hp = int(enemy_lvl * 10 * mult)
+                        base_dm = int(enemy_lvl * 6 * mult)
+                        base_spd = int(enemy_lvl * 1.2 * mult)
+                        
+                        opp_team[mon_name] = make_pokemon(base_hp, base_dm, mon_type, mon_moves, speed=base_spd)
+                        opp_team[mon_name]["lvl"] = enemy_lvl
+                    
+                    # Show opponent team preview
+                    print(f"\n  {BOLD}{BRIGHT_RED}═══ Opponent Team ═══{RESET}")
+                    for mon_name, mon_stats in opp_team.items():
+                        print(f"    {BRIGHT_CYAN}{mon_name.upper()}{RESET}  Lvl {mon_stats['lvl']}  {mon_stats['type']}  HP:{mon_stats['hp']} DM:{mon_stats['dm']}")
+                    print()
+                    
                     pvp_battle_context = {
                         "mode": "Ranked PvP", 
                         "inventory": inventory, 
                         "player_team": pokemon,
-                        "ai_persona": random.choice(["Hyper-Offense", "Defensive", "Trickster", "Tactical"]),
+                        "ai_persona": opp_persona,
                         "enemy_trainer_name": opp_name
                     }
                     pvp_weather = get_random_weather()
                     
                     pvp_won, pvp_xp, pvp_money = run_team_battle(pokemon, opp_team, pvp_weather, pvp_battle_context)
                     
+                    # RP calculation with streak bonus
                     if pvp_won:
-                        rp_gain = 30
+                        base_rp = 25
+                        # Bonus for beating higher tier
+                        tier_bonus = {"Bronze": 0, "Silver": 5, "Gold": 10, "Master": 15, "Champion": 25}
+                        rp_gain = base_rp + tier_bonus.get(opp_tier, 0)
                         pvp_rp += rp_gain
-                        coins_reward = enemy_lvl * 50
+                        coins_reward = enemy_lvl * 50 + tier_bonus.get(opp_tier, 0) * 20
                         money += coins_reward
                         print()
                         fancy_header("RANKED VICTORY", emoji="🏆", width=55)
@@ -2454,7 +2856,8 @@ try:
                         print(f"  {BOLD}RP Gain:{RESET} {BRIGHT_GREEN}+{rp_gain} RP{RESET} (New RP: {pvp_rp})")
                         print(f"  {BOLD}Bonus Reward:{RESET} {BRIGHT_YELLOW}+{coins_reward} coins!{RESET}")
                     else:
-                        rp_loss = 20
+                        base_loss = 15
+                        rp_loss = base_loss
                         pvp_rp = max(1000, pvp_rp - rp_loss)
                         print()
                         fancy_header("RANKED DEFEAT", emoji="💀", width=55)
@@ -2596,7 +2999,7 @@ try:
                 elif station_choice == "4":
                     break
 
-        exit_option = 20 if len(gym_badges_check) >= len(GYM_LEADERS) else 19
+        exit_option = 21 if len(gym_badges_check) >= len(GYM_LEADERS) else 20
         if option == exit_option:
             break
 
@@ -2642,9 +3045,41 @@ try:
                 continue
 
         # ══════════════════════════════════════
-        # OPTION 19: ELITE FOUR
+        # OPTION 19: BOSS RAIDS
         # ══════════════════════════════════════
-        ef_option_number = 19 if len(gym_badges_check) >= len(GYM_LEADERS) else -1
+        if option == 19:
+            clear_screen()
+            if not pokemon:
+                print(f"\n  {BOLD}{BRIGHT_RED}❌ You need Pokemon first!{RESET}")
+                time.sleep(1)
+                continue
+            
+            fancy_header("LEGENDARY BOSS RAIDS", emoji="👑", width=55)
+            print(f"  {DIM}Challenge legendary bosses for massive rewards!{RESET}")
+            print(f"  {BOLD}{BRIGHT_RED}⚠️ Bosses have 10x+ HP and Elemental Shields!{RESET}")
+            print()
+            
+            from game_functions import LEGENDARY_BOSSES
+            boss_list = list(LEGENDARY_BOSSES.keys())
+            for i, bkey in enumerate(boss_list, 1):
+                boss = LEGENDARY_BOSSES[bkey]
+                reward = boss["reward"]
+                print(f"  {BOLD}{BRIGHT_WHITE}{i}.{RESET} {BRIGHT_MAGENTA}{boss['name']}{RESET} {DIM}({boss['type']}){RESET}")
+                print(f"     {DIM}Reward: {reward['coins']} coins, {reward['trophies']} trophies, {reward['item']}{RESET}")
+            print(f"  {BOLD}{BRIGHT_WHITE}{len(boss_list)+1}.{RESET} {RED}Back{RESET}")
+            print()
+            
+            boss_choice = crazy_int_input("Select a boss to challenge")
+            if 1 <= boss_choice <= len(boss_list):
+                selected_boss = boss_list[boss_choice - 1]
+                from game_functions import run_boss_raid
+                run_boss_raid(pokemon, selected_boss, inventory)
+            continue
+
+        # ══════════════════════════════════════
+        # OPTION 20: ELITE FOUR
+        # ══════════════════════════════════════
+        ef_option_number = 20 if len(gym_badges_check) >= len(GYM_LEADERS) else -1
         if option == ef_option_number:
             clear_screen()
             if not pokemon:

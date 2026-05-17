@@ -2487,96 +2487,170 @@ def battle_hud(your_name, your_hp, your_maxhp, your_dm,
                your_status=None, enemy_status=None, weather="Clear",
                your_stages=None, enemy_stages=None, turn=0,
                messages=None, your_ability=None, your_item=None,
-               enemy_ability=None):
-    """Display a premium double-border battle HUD."""
-    width = 38
-    
-    # Weather Themes
-    weather_colors = {
-        "Clear": BRIGHT_WHITE, "Rain": BRIGHT_BLUE, "Sun": BRIGHT_YELLOW, 
-        "Sandstorm": DIM, "Hail": BRIGHT_CYAN, "Fog": BRIGHT_MAGENTA,
-        "Acid Rain": BRIGHT_GREEN, "Solar Flare": BRIGHT_RED
-    }
-    w_color = weather_colors.get(weather, BRIGHT_WHITE)
-    
-    y_ratio = max(0, min(1, your_hp / your_maxhp))
-    y_filled = int(20 * y_ratio)
-    y_empty = 20 - y_filled
-    y_color = BRIGHT_GREEN if y_ratio > 0.5 else (BRIGHT_YELLOW if y_ratio > 0.25 else BRIGHT_RED)
-    
-    e_ratio = max(0, min(1, enemy_hp / enemy_maxhp))
-    e_filled = int(20 * e_ratio)
-    e_empty = 20 - e_filled
-    e_color = BRIGHT_GREEN if e_ratio > 0.5 else (BRIGHT_YELLOW if e_ratio > 0.25 else BRIGHT_RED)
-    
-    def build_bar(color, filled, empty):
-        return f"{color}{'█'*filled}{DIM}{'░'*empty}{RESET}"
-        
-    def pad_text(text, w):
-        return text + " " * max(0, w - len(text))
-        
-    def center_text(text, w):
-        pad = max(0, w - len(text))
-        return " " * (pad // 2) + text + " " * (pad - pad // 2)
+               enemy_ability=None, enemy_item=None, battle_mode=None):
+     """Display a premium double-border split-pane battle HUD with ability/item indicators."""
+     width = 40
+     
+     # Weather Themes
+     weather_icons = {
+         "Clear": "☀️", "Rain": "🌧️", "Sun": "🔥", 
+         "Sandstorm": "🌪️", "Hail": "❄️", "Fog": "🌫️",
+         "Acid Rain": "☣️", "Solar Flare": "☀️"
+     }
+     weather_colors = {
+         "Clear": BRIGHT_WHITE, "Rain": BRIGHT_BLUE, "Sun": BRIGHT_YELLOW, 
+         "Sandstorm": DIM, "Hail": BRIGHT_CYAN, "Fog": BRIGHT_MAGENTA,
+         "Acid Rain": BRIGHT_GREEN, "Solar Flare": BRIGHT_RED
+     }
+     w_color = weather_colors.get(weather, BRIGHT_WHITE)
+     w_icon = weather_icons.get(weather, "☀️")
+     
+     # HP ratio calculations
+     y_ratio = max(0, min(1, your_hp / your_maxhp)) if your_maxhp > 0 else 0
+     y_filled = int(18 * y_ratio)
+     y_empty = 18 - y_filled
+     y_color = BRIGHT_GREEN if y_ratio > 0.5 else (BRIGHT_YELLOW if y_ratio > 0.25 else BRIGHT_RED)
+     
+     e_ratio = max(0, min(1, enemy_hp / enemy_maxhp)) if enemy_maxhp > 0 else 0
+     e_filled = int(18 * e_ratio)
+     e_empty = 18 - e_filled
+     e_color = BRIGHT_GREEN if e_ratio > 0.5 else (BRIGHT_YELLOW if e_ratio > 0.25 else BRIGHT_RED)
+     
+     def build_bar(color, filled, empty):
+         return f"{color}{'█'*filled}{DIM}{'░'*empty}{RESET}"
+         
+     def pad_text(text, w):
+         return text + " " * max(0, w - len(text))
+         
+     def center_text(text, w):
+         pad = max(0, w - len(text))
+         return " " * (pad // 2) + text + " " * (pad - pad // 2)
+     
+     def fmt_ability(ab):
+         if not ab or ab == "None":
+             return f"{DIM}—{RESET}"
+         return f"{BRIGHT_CYAN}{ab}{RESET}"
+     
+     def fmt_item(item):
+         if not item:
+             return f"{DIM}—{RESET}"
+         return f"{BRIGHT_YELLOW}{item}{RESET}"
+     
+     def fmt_status(status):
+         if not status:
+             return f"{BRIGHT_GREEN}OK{RESET}"
+         status_colors = {
+             "Burn": BRIGHT_RED, "Poison": BRIGHT_MAGENTA,
+             "Paralyze": BRIGHT_YELLOW, "Sleep": DIM, "Freeze": BRIGHT_CYAN
+         }
+         color = status_colors.get(status, BRIGHT_WHITE)
+         return f"{color}{status}{RESET}"
+         
+     def fmt_stages(stages):
+         if not stages: return f"{DIM}—{RESET}"
+         parts = []
+         for s, v in stages.items():
+             if v > 0: parts.append(f"{BRIGHT_GREEN}{s[:3].upper()}+{v}{RESET}")
+             elif v < 0: parts.append(f"{BRIGHT_RED}{s[:3].upper()}{v}{RESET}")
+         return " ".join(parts) if parts else f"{DIM}—{RESET}"
 
-    # Top border
-    print(f"  {w_color}╔{'═' * width}╦{'═' * width}╗{RESET}")
-    
-    # Row 1: Headers
-    left_1 = pad_text(f"  WEATHER: {weather.upper()}", width - 12) + f"Trn {turn:>3} "
-    right_1 = center_text("ENEMY TARGET", width)
-    print(f"  {w_color}║{RESET}{BOLD}{BRIGHT_CYAN}{left_1}{RESET}{w_color}║{RESET}{BOLD}{BRIGHT_RED}{right_1}{RESET}{w_color}║{RESET}")
-    
-    print(f"  {w_color}╠{'═' * width}╬{'═' * width}╣{RESET}")
-    
-    # Row 2: Names
-    y_name_padded = pad_text(f" {your_name.upper()}", width)
-    e_name_padded = pad_text(f" {enemy_name.upper()}", width)
-    print(f"  {w_color}║{RESET}{BOLD}{BRIGHT_GREEN}{y_name_padded}{RESET}{w_color}║{RESET}{BOLD}{BRIGHT_YELLOW}{e_name_padded}{RESET}{w_color}║{RESET}")
-    
-    # Row 3: HP bars
-    y_hp_str = f" HP: {your_hp:>4}/{your_maxhp:<4}"
-    y_bar_str = build_bar(y_color, y_filled, y_empty)
-    e_hp_str = f" HP: {enemy_hp:>4}/{enemy_maxhp:<4}"
-    e_bar_str = build_bar(e_color, e_filled, e_empty)
-    print(f"  {w_color}║{RESET}{BOLD}{BRIGHT_WHITE}{y_hp_str}{RESET} {y_bar_str}   {w_color}║{RESET}{BOLD}{BRIGHT_WHITE}{e_hp_str}{RESET} {e_bar_str}   {w_color}║{RESET}")
-    
-    # Row 4: Status / Items
-    y_stat_str = f" [{your_status}]" if your_status else ""
-    if your_item: y_stat_str += f" + {your_item}"
-    left_4 = pad_text(y_stat_str, width)
-    
-    e_stat_str = f" [{enemy_status}]" if enemy_status else ""
-    right_4 = pad_text(e_stat_str, width)
-    
-    print(f"  {w_color}║{RESET}{BOLD}{BRIGHT_MAGENTA}{left_4}{RESET}{w_color}║{RESET}{BOLD}{BRIGHT_MAGENTA}{right_4}{RESET}{w_color}║{RESET}")
-    
-    # Row 5: Stages (if any)
-    def fmt_stages(stages):
-        if not stages: return ""
-        p = []
-        for s, v in stages.items():
-            if v > 0: p.append(f"{s[:3].upper()}+{v}")
-            elif v < 0: p.append(f"{s[:3].upper()}{v}")
-        return " " + " ".join(p)
-        
-    y_stages_str = fmt_stages(your_stages)
-    e_stages_str = fmt_stages(enemy_stages)
-    
-    if y_stages_str or e_stages_str:
-        left_5 = pad_text(y_stages_str, width)
-        right_5 = pad_text(e_stages_str, width)
-        print(f"  {w_color}║{RESET}{BRIGHT_CYAN}{left_5}{RESET}{w_color}║{RESET}{BRIGHT_CYAN}{right_5}{RESET}{w_color}║{RESET}")
-
-    # Bottom border
-    print(f"  {w_color}╚{'═' * width}╩{'═' * width}╝{RESET}")
-    
-    # Message log (bottom pane)
-    if messages:
-        print(f"  {w_color}┌{'─' * (width*2 + 1)}{RESET}")
-        for msg in messages[-3:]:
-            print(f"  {w_color}│{RESET}  {msg}")
-        print(f"  {w_color}└{'─' * (width*2 + 1)}{RESET}")
+     # Mode indicator
+     mode_str = f" [{battle_mode}]" if battle_mode else ""
+     
+     # ═══════════════════════════════════════════════════
+     # TOP HEADER BAR
+     # ═══════════════════════════════════════════════════
+     print(f"  {w_color}╔{'═' * (width*2 + 3)}╗{RESET}")
+     
+     # Row 1: Weather + Turn + Mode
+     header_left = f"  {w_icon} {weather.upper():12}"
+     header_center = f"Turn {turn:>3}{mode_str}"
+     header_right = f"{'─' * 10}"
+     header_combined = pad_text(header_left + header_center, width * 2)
+     print(f"  {w_color}║{RESET}{BOLD}{BRIGHT_WHITE}{header_combined}{RESET}{w_color}║{RESET}")
+     
+     print(f"  {w_color}╠{'═' * width}╦{'═' * width}╣{RESET}")
+     
+     # ═══════════════════════════════════════════════════
+     # LEFT PANE: YOUR POKEMON
+     # ═══════════════════════════════════════════════════
+     # Name
+     y_name_line = pad_text(f" {your_name.upper()}", width)
+     print(f"  {w_color}║{RESET}{BOLD}{BRIGHT_GREEN}{y_name_line}{RESET}{w_color}║", end="")
+     
+     # RIGHT PANE: ENEMY POKEMON
+     e_name_line = pad_text(f" {enemy_name.upper()}", width)
+     print(f"{BOLD}{BRIGHT_RED}{e_name_line}{RESET}{w_color}║{RESET}")
+     
+     # HP Bars
+     y_hp_text = f" {your_hp:>4}/{your_maxhp:<4}"
+     y_bar = build_bar(y_color, y_filled, y_empty)
+     y_hp_line = pad_text(y_hp_text + " " + y_bar, width)
+     print(f"  {w_color}║{RESET}{BOLD}{BRIGHT_WHITE}{y_hp_line}{RESET}{w_color}║", end="")
+     
+     e_hp_text = f" {enemy_hp:>4}/{enemy_maxhp:<4}"
+     e_bar = build_bar(e_color, e_filled, e_empty)
+     e_hp_line = pad_text(e_hp_text + " " + e_bar, width)
+     print(f"{BOLD}{BRIGHT_WHITE}{e_hp_line}{RESET}{w_color}║{RESET}")
+     
+     # HP % indicators
+     y_pct = int(y_ratio * 100)
+     e_pct = int(e_ratio * 100)
+     y_pct_line = pad_text(f"  {y_pct}% HP", width)
+     e_pct_line = pad_text(f"  {e_pct}% HP", width)
+     print(f"  {w_color}║{RESET}{DIM}{y_pct_line}{RESET}{w_color}║{RESET}{DIM}{e_pct_line}{RESET}{w_color}║{RESET}")
+     
+     print(f"  {w_color}╠{'═' * width}╬{'═' * width}╣{RESET}")
+     
+     # ═══════════════════════════════════════════════════
+     # STATS ROW: Ability, Item, Status
+     # ═══════════════════════════════════════════════════
+     # Ability
+     y_ab_line = pad_text(f" Ability: {fmt_ability(your_ability)}", width)
+     e_ab_line = pad_text(f" Ability: {fmt_ability(enemy_ability)}", width)
+     print(f"  {w_color}║{RESET}{BOLD}{y_ab_line}{RESET}{w_color}║{RESET}{BOLD}{e_ab_line}{RESET}{w_color}║{RESET}")
+     
+     # Held Item
+     y_item_line = pad_text(f" Item:    {fmt_item(your_item)}", width)
+     e_item_line = pad_text(f" Item:    {fmt_item(enemy_item)}", width)
+     print(f"  {w_color}║{RESET}{BOLD}{y_item_line}{RESET}{w_color}║{RESET}{BOLD}{e_item_line}{RESET}{w_color}║{RESET}")
+     
+     # Status
+     y_status_line = pad_text(f" Status:  {fmt_status(your_status)}", width)
+     e_status_line = pad_text(f" Status:  {fmt_status(enemy_status)}", width)
+     print(f"  {w_color}║{RESET}{BOLD}{y_status_line}{RESET}{w_color}║{RESET}{BOLD}{e_status_line}{RESET}{w_color}║{RESET}")
+     
+     print(f"  {w_color}╠{'═' * width}╬{'═' * width}╣{RESET}")
+     
+     # ═══════════════════════════════════════════════════
+     # STAGES ROW
+     # ═══════════════════════════════════════════════════
+     y_stg_line = pad_text(f" Stages:  {fmt_stages(your_stages)}", width)
+     e_stg_line = pad_text(f" Stages:  {fmt_stages(enemy_stages)}", width)
+     print(f"  {w_color}║{RESET}{BOLD}{y_stg_line}{RESET}{w_color}║{RESET}{BOLD}{e_stg_line}{RESET}{w_color}║{RESET}")
+     
+     # DM stat
+     y_dm_line = pad_text(f" DM:      {BOLD}{BRIGHT_RED}{your_dm}{RESET}", width)
+     e_dm_line = pad_text(f" DM:      {BOLD}{BRIGHT_RED}{enemy_dm}{RESET}", width)
+     print(f"  {w_color}║{RESET}{BOLD}{y_dm_line}{RESET}{w_color}║{RESET}{BOLD}{e_dm_line}{RESET}{w_color}║{RESET}")
+     
+     # Bottom border
+     print(f"  {w_color}╚{'═' * (width*2 + 3)}╝{RESET}")
+     
+     # ═══════════════════════════════════════════════════
+     # BATTLE LOG (bottom pane)
+     # ═══════════════════════════════════════════════════
+     if messages:
+         log_width = width * 2 + 3
+         print(f"  {w_color}┌{'─' * log_width}{RESET}")
+         for msg in messages[-4:]:
+             # Strip ANSI for length calculation
+             clean_msg = msg
+             for code in [BOLD, RESET, BRIGHT_RED, BRIGHT_GREEN, BRIGHT_YELLOW, BRIGHT_BLUE, BRIGHT_MAGENTA, BRIGHT_CYAN, BRIGHT_WHITE, DIM]:
+                 clean_msg = clean_msg.replace(code, "")
+             padded = pad_text(f"  {msg}", log_width)
+             print(f"  {w_color}│{RESET}{padded}{w_color}│{RESET}")
+         print(f"  {w_color}└{'─' * log_width}{RESET}")
 
 
 def shop_item_card(name, cost, hp, dm, index):
