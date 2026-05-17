@@ -1,0 +1,97 @@
+{
+    "name": "TestPlayer",
+    "pokemon": {
+        "charmander": {
+            "hp": 65,
+            "maxhp": 65,
+            "dm": 30,
+            "speed": 65,
+            "xp": 0,
+            "lvl": 3,
+            "maxxp": 150,
+            "type": "Fire",
+            "moves": [
+                "Ember",
+                "Scratch",
+                "Growl"
+            ],
+            "pp": {
+                "Ember": 40,
+                "Scratch": 56,
+                "Growl": 64
+            },
+            "stages": {
+                "dm": 0,
+                "speed": 0
+            },
+            "status": null,
+            "shiny": false,
+            "generation": 0,
+            "ability": null,
+            "hold_item": null,
+            "name": "charmander"
+        },
+        "kakuna": {
+            "hp": 3,
+            "maxhp": 56,
+            "dm": 25,
+            "speed": 35,
+            "xp": 66,
+            "lvl": 2,
+            "maxxp": 100,
+            "type": "Bug",
+            "moves": [
+                "Poison Sting",
+                "Bug Bite",
+                "String Shot"
+            ],
+            "pp": {
+                "Poison Sting": 56,
+                "Bug Bite": 31,
+                "String Shot": 64
+            },
+            "stages": {
+                "dm": 0,
+                "speed": 0
+            },
+            "status": null,
+            "shiny": false,
+            "generation": 0,
+            "ability": "Swarm",
+            "hold_item": null,
+            "name": "kakuna"
+        }
+    },
+    "money": 995,
+    "heal_tickets": 45,
+    "trophies": 500,
+    "inventory": {
+        "Potion": 4,
+        "Ultra Ball": 0
+    },
+    "location": "Volcano",
+    "badges": [],
+    "tower_record": 0,
+    "pokedex_seen": [
+        "tyranitar",
+        "kakuna",
+        "butterfree",
+        "gastly",
+        "charmander"
+    ],
+    "pokedex_caught": [
+        "charmander",
+        "kakuna"
+    ],
+    "elite_four_defeated": [],
+    "achievements": {
+        "unlocked": [
+            1
+        ],
+        "counters": {
+            "defeats": 1,
+            "catch": 1,
+            "explore": 1
+        }
+    }
+}
