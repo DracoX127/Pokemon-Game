@@ -21,6 +21,18 @@ class PokemonChatbot:
         self.greeted = False
         self.conversation_count = 0
     
+    def greet(self):
+        """Return a greeting message."""
+        return get_greeting(0)
+    
+    def say_goodbye(self):
+        """Return a goodbye message."""
+        return get_goodbye()
+    
+    def respond(self, user_input):
+        """Process user input and return a response."""
+        return self.process(user_input)
+    
     def process(self, user_input):
         """Process user input and return a response."""
         if not user_input:

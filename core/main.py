@@ -39,11 +39,7 @@ def check_and_install_packages():
 
 check_and_install_packages()
 
-try:
-    import requests
-    HAS_REQUESTS = True
-except ImportError:
-    HAS_REQUESTS = False
+import requests
 
 from pokemon_dex import weak_pokemon, moderately_strong_pokemon, strong_pokemon, ultra_strong_pokemon
 from pokemon_shop_info import pokemonshop_starter, pokemonshop_competitive, pokemonshop_legends
@@ -65,7 +61,7 @@ from fusion_dex import FUSION_DEX
 from moves_data import MOVES
 from inventory import ITEMS
 from ui_core import *
-from save_manager import save_game, load_game
+from save_manager import save_game
 from quest_manager import quest_manager
 from achievements import achievement_manager, AchievementManager, ACHIEVEMENTS
 from settings import GAME_SETTINGS
@@ -95,107 +91,46 @@ cloud_token = None
 cloud_username = None
 SERVER_URL = "http://localhost:5001/api"
 
-class MockResponse:
-    def __init__(self, status_code, json_data):
-        self.status_code = status_code
-        self._json_data = json_data
-    
-    def json(self):
-        return self._json_data
+def robust_request(method, url, json_data=None, headers=None, timeout=5):
+    """Make HTTP requests to the cloud server. No local fallback."""
+    if method == "POST":
+        return requests.post(url, json=json_data, headers=headers, timeout=timeout)
+    elif method == "GET":
+        return requests.get(url, headers=headers, timeout=timeout)
 
-SIMULATED_DB_FILE = "cloud_simulation.json"
-
-def get_simulated_db():
-    if not os.path.exists(SIMULATED_DB_FILE):
-        return {"users": {}, "saves": {}}
+def is_server_running():
     try:
-        with open(SIMULATED_DB_FILE, "r") as f:
-            return json.load(f)
+        r = requests.get(f"{SERVER_URL}/health", timeout=1)
+        return True
     except:
-        return {"users": {}, "saves": {}}
+        return False
 
-def save_simulated_db(db):
+def start_server():
+    if is_server_running():
+        return
     try:
-        with open(SIMULATED_DB_FILE, "w") as f:
-            json.dump(db, f, indent=4)
+        server_path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "utils", "server.py")
+        subprocess.Popen([sys.executable, server_path], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        for _ in range(20):
+            time.sleep(0.2)
+            if is_server_running():
+                return
     except:
         pass
 
-def robust_request(method, url, json_data=None, headers=None, timeout=5):
-    # Try actual network call first
-    if HAS_REQUESTS:
-        try:
-            if method == "POST":
-                return requests.post(url, json=json_data, headers=headers, timeout=timeout)
-            elif method == "GET":
-                return requests.get(url, headers=headers, timeout=timeout)
-        except Exception:
-            pass
-    
-    # Fallback to simulation
-    endpoint = url.replace(SERVER_URL, "")
-    db = get_simulated_db()
-    
-    if endpoint == "/register":
-        username = json_data.get("username") if json_data else ""
-        password = json_data.get("password") if json_data else ""
-        if username in db["users"]:
-            return MockResponse(400, {"message": "Username taken"})
-        db["users"][username] = password
-        save_simulated_db(db)
-        return MockResponse(201, {"message": "User registered"})
-        
-    elif endpoint == "/login":
-        username = json_data.get("username") if json_data else ""
-        password = json_data.get("password") if json_data else ""
-        if username in db["users"] and db["users"][username] == password:
-            token = f"simulated-token-for-{username}"
-            return MockResponse(200, {"token": token})
-        return MockResponse(401, {"message": "Invalid credentials"})
-        
-    elif endpoint == "/save":
-        token = headers.get("Authorization", "").replace("Bearer ", "") if headers else ""
-        if token.startswith("simulated-token-for-"):
-            username = token.replace("simulated-token-for-", "")
-            db["saves"][username] = json_data.get("save_data") if json_data else ""
-            save_simulated_db(db)
-            return MockResponse(200, {"message": "Saved"})
-        return MockResponse(401, {"message": "Invalid token"})
-        
-    elif endpoint == "/load":
-        token = headers.get("Authorization", "").replace("Bearer ", "") if headers else ""
-        if token.startswith("simulated-token-for-"):
-            username = token.replace("simulated-token-for-", "")
-            save_data = db["saves"].get(username)
-            if save_data:
-                return MockResponse(200, {"save_data": save_data})
-            return MockResponse(404, {"message": "No save"})
-        return MockResponse(401, {"message": "Invalid token"})
-        
-    return MockResponse(500, {"message": "Simulated endpoint error"})
-
-if HAS_REQUESTS:
-    def is_server_running():
-        try:
-            r = requests.get(f"{SERVER_URL}/health", timeout=1)
-            return True
-        except:
-            return False
-
-    def start_server():
-        if is_server_running():
-            return
-        try:
-            server_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "server.py")
-            subprocess.Popen([sys.executable, server_path], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-            for _ in range(20):
-                time.sleep(0.2)
-                if is_server_running():
-                    return
-        except:
-            pass
-
     start_server()
+
+# ══════════════════════════════════════════════════
+# START CLOUD SERVER
+# ══════════════════════════════════════════════════
+print(f"  {DIM}☁️  Starting cloud server...{RESET}")
+start_server()
+if not is_server_running():
+    print(f"  {BRIGHT_RED}❌ Failed to start cloud server. Cannot play offline.{RESET}")
+    time.sleep(2)
+    sys.exit(0)
+print(f"  {BRIGHT_GREEN}✅ Cloud server running!{RESET}")
+time.sleep(0.5)
 
 # ══════════════════════════════════════════════════
 # EPIC WELCOME SCREEN
@@ -225,10 +160,9 @@ fancy_header("POKÉMON CLOUD GATEWAY", emoji="☁️", width=50)
 
 print(f"  {BOLD}{BRIGHT_CYAN}1.{RESET} 🔑 Login to Existing Cloud Account")
 print(f"  {BOLD}{BRIGHT_YELLOW}2.{RESET} 📝 Register a New Cloud Account")
-print(f"  {BOLD}{DIM}3.{RESET} 🔌 Play Offline (Local Saves Only)")
 print()
 theme_divider(50)
-gateway_opt = crazy_input("Choose an option (1, 2, or 3)").strip()
+gateway_opt = crazy_input("Choose an option (1 or 2)").strip()
 
 cloud_token = None
 cloud_username = None
@@ -242,13 +176,13 @@ if gateway_opt == "1":
         r = robust_request("POST", f"{SERVER_URL}/login", json_data={"username": username, "password": password}, timeout=5)
         if r.status_code == 200:
             cloud_token = r.json()["token"]
-            cloud_username = username
-            print(f"\n  {BRIGHT_GREEN}✅ Logged in successfully as {username}!{RESET}")
+            cloud_username = r.json().get("username", username)
+            print(f"\n  {BRIGHT_GREEN}✅ Logged in successfully as {cloud_username}!{RESET}")
             # Try to pull save data immediately
             pull_r = robust_request("GET", f"{SERVER_URL}/load", headers={"Authorization": f"Bearer {cloud_token}"}, timeout=5)
             if pull_r.status_code == 200:
                 data = json.loads(pull_r.json()["save_data"])
-                print(f"  {BOLD}{BRIGHT_YELLOW}💾 Cloud save file found for {username}!{RESET}")
+                print(f"  {BOLD}{BRIGHT_YELLOW}💾 Cloud save file found for {cloud_username}!{RESET}")
                 ans = crazy_input(f"Would you like to load your cloud save as {data.get('name', 'Trainer')}? (y/n)")
                 if ans.lower() == 'y':
                     name = data.get("name", "Trainer")
@@ -275,12 +209,14 @@ if gateway_opt == "1":
                 time.sleep(1)
         else:
             print(f"  {BRIGHT_RED}❌ Login failed: {r.json().get('message', 'Error')}{RESET}")
-            print(f"  {DIM}Proceeding to offline mode...{RESET}")
+            print(f"  {DIM}Please try again or register a new account.{RESET}")
             time.sleep(1.5)
+            sys.exit(0)
     except Exception as e:
         print(f"  {BRIGHT_RED}❌ Server error: {e}{RESET}")
-        print(f"  {DIM}Proceeding to offline mode...{RESET}")
+        print(f"  {DIM}Cannot connect to cloud server. Exiting...{RESET}")
         time.sleep(1.5)
+        sys.exit(0)
 
 elif gateway_opt == "2":
     username = crazy_input("Choose Username").strip()
@@ -292,59 +228,31 @@ elif gateway_opt == "2":
             login_r = robust_request("POST", f"{SERVER_URL}/login", json_data={"username": username, "password": password}, timeout=5)
             if login_r.status_code == 200:
                 cloud_token = login_r.json()["token"]
-                cloud_username = username
-                print(f"  {BRIGHT_GREEN}✅ Automatically logged in as {username}!{RESET}")
+                cloud_username = login_r.json().get("username", username)
+                print(f"  {BRIGHT_GREEN}✅ Automatically logged in as {cloud_username}!{RESET}")
             time.sleep(1)
         else:
             print(f"  {BRIGHT_RED}❌ Registration failed: {r.json().get('message', 'Error')}{RESET}")
-            print(f"  {DIM}Proceeding to offline mode...{RESET}")
+            print(f"  {DIM}Please try again.{RESET}")
             time.sleep(1.5)
+            sys.exit(0)
     except Exception as e:
         print(f"  {BRIGHT_RED}❌ Server error: {e}{RESET}")
-        print(f"  {DIM}Proceeding to offline mode...{RESET}")
+        print(f"  {DIM}Cannot connect to cloud server. Exiting...{RESET}")
         time.sleep(1.5)
+        sys.exit(0)
 
 else:
-    print(f"\n  {DIM}Entering offline mode...{RESET}")
-    time.sleep(0.5)
-
-# Check for existing save
-if not load_success:
-    saved_state = load_game()
-    if saved_state:
-        print(f"  {BOLD}{BRIGHT_YELLOW}💾 Local save file found!{RESET}")
-        ans = crazy_input(f"Would you like to load your previous local game as {saved_state.get('name', 'Trainer')}? (y/n)")
-        if ans.lower() == 'y':
-            name = saved_state.get('name', 'Trainer')
-            pokemon = saved_state.get('pokemon', {})
-            money = saved_state.get('money', 500)
-            pvp_rp = saved_state.get('pvp_rp', 1000)
-            trophies = saved_state.get('trophies', 0)
-            inventory = saved_state.get('inventory', {"Potion": 3})
-            location = saved_state.get('location', "Grasslands")
-            badges = saved_state.get('badges', [])
-            tower_record = saved_state.get('tower_record', 0)
-            pokedex_seen = set(saved_state.get('pokedex_seen', []))
-            pokedex_caught = set(saved_state.get('pokedex_caught', []))
-            elite_four_defeated = saved_state.get('elite_four_defeated', [])
-            heal_tickets = saved_state.get('heal_tickets', 50)
-            ach_data = saved_state.get('achievements', {"unlocked":[],"counters":{}})
-            if isinstance(achievement_manager, object):
-                achievement_manager.__dict__.update(AchievementManager.from_dict(ach_data).__dict__)
-            daycare = saved_state.get('daycare', {"slots": [], "steps": 0, "egg_waiting": False})
-            load_success = True
-            print(f"\n  {BOLD}{BRIGHT_GREEN}✅ Local Game Loaded Successfully!{RESET}")
-            time.sleep(1)
+    print(f"\n  {BRIGHT_RED}❌ Invalid option. You must login or register to play.{RESET}")
+    time.sleep(1)
+    sys.exit(0)
 
 if not load_success:
-    if cloud_username:
-        name = cloud_username
-        print(f"  {BRIGHT_GREEN}👋 Welcome to the world of Pokémon, {name}!{RESET}")
-        time.sleep(1)
-    else:
-        name = crazy_input("Enter ur name").strip()
+    name = cloud_username
+    print(f"  {BRIGHT_GREEN}👋 Welcome to the world of Pokémon, {name}!{RESET}")
+    time.sleep(1)
     print()
-    pokeball_loading("Registering trainer", duration=1.0)
+    pokeball_loading("Creating new trainer profile", duration=1.0)
     print()
 
     if name == "Ash":
@@ -507,6 +415,9 @@ try:
         clear_screen()
         advance_time(1)
         
+        # Badge count for Elite Four unlock
+        gym_badges_check = [b for b in badges if any(b == g[1]["badge"] for g in GYM_LEADERS.items())]
+        
         # ══════════════════════════════════════════════════
         # DAYCARE & EGG HATCHING UPDATES
         # ══════════════════════════════════════════════════
@@ -657,38 +568,158 @@ try:
         )
         render_panel_grid([p_left, p_right], width=56)
         print()
-        print(f"  {BOLD}{BRIGHT_RED}1.{RESET}  ⚔️  Catch Pokemon       {DIM}[Wild encounters]{RESET}")
-        print(f"  {BOLD}{BRIGHT_CYAN}2.{RESET}  📊 Stats              {DIM}[View team]{RESET}")
-        print(f"  {BOLD}{BRIGHT_YELLOW}3.{RESET}  🏟️  Arena               {DIM}[Battle trainers]{RESET}")
-        print(f"  {BOLD}{BRIGHT_GREEN}4.{RESET}  🏪 Shop               {DIM}[Buy items & tickets]{RESET}")
-        print(f"  {BOLD}{BRIGHT_MAGENTA}5.{RESET}  🏥 Hospital           {DIM}[Heal with tickets]{RESET}")
-        print(f"  {BOLD}{BRIGHT_BLUE}6.{RESET}  🎒 Bag                {DIM}[Use items]{RESET}")
-        print(f"  {BOLD}{BRIGHT_WHITE}7.{RESET}  🗺️  Travel              {DIM}[Change regions]{RESET}")
-        print(f"  {BOLD}{BRIGHT_WHITE}8.{RESET}  ⚙️  Settings            {DIM}[Customize UI]{RESET}")
-        print(f"  {BOLD}{BRIGHT_CYAN}9.{RESET}  ☁️  Cloud Account       {DIM}[{cloud_username if cloud_token else 'Not logged in'}]{RESET}")
-        print(f"  {BOLD}{BRIGHT_YELLOW}10.{RESET} 🏅 Gym Challenge      {DIM}[Badges: {len(badges)}/8]{RESET}")
-        print(f"  {BOLD}{BRIGHT_CYAN}11.{RESET} 🗼 Battle Tower        {DIM}[Record: {tower_record}]{RESET}")
-        print(f"  {BOLD}{BRIGHT_MAGENTA}12.{RESET} 🧬 Fusion Lab         {DIM}[Fuse Pokemon]{RESET}")
-        print(f"  {BOLD}{BRIGHT_GREEN}13.{RESET} 📖 Pokedex            {DIM}[{len(pokedex_caught)} caught]{RESET}")
-        print(f"  {BOLD}{BRIGHT_GREEN}14.{RESET} 📋 Quest Board        {DIM}[{len(quest_manager.active)} active]{RESET}")
-        print(f"  {BOLD}{BRIGHT_RED}15.{RESET} 🐛 Bug Hunt           {DIM}[Corrupted gauntlet]{RESET}")
-        egg_notif = f" {BOLD}{BRIGHT_YELLOW}[☁️ Egg Ready!]{RESET}" if daycare.get("egg_waiting") else ""
-        print(f"  {BOLD}{BRIGHT_YELLOW}16.{RESET} 🏡 Daycare & Breeding {DIM}[Level & Breed]{RESET}{egg_notif}")
-        print(f"  {BOLD}{BRIGHT_BLUE}17.{RESET} 📶 GTS & Ranked PvP   {DIM}[Online station]{RESET}")
-        print(f"  {BOLD}{BRIGHT_MAGENTA}18.{RESET} 🏰 Dungeon Gauntlets  {DIM}[Endurance Gauntlet]{RESET}")
-        print(f"  {BOLD}{BRIGHT_RED}19.{RESET} 👑 Boss Raids          {DIM}[Legendary battles]{RESET}")
+        print(f"  {BOLD}{BRIGHT_RED}A.{RESET}  ⚔️  Adventure           {DIM}[Explore & battle]{RESET}")
+        print(f"  {BOLD}{BRIGHT_CYAN}B.{RESET}  🏆 Competitive        {DIM}[Towers, raids & PvP]{RESET}")
+        print(f"  {BOLD}{BRIGHT_GREEN}C.{RESET}  🎒 Management         {DIM}[Items, shop & fusion]{RESET}")
+        print(f"  {BOLD}{BRIGHT_MAGENTA}D.{RESET}  📊 Info & Social      {DIM}[Stats, pokedex & cloud]{RESET}")
+        print(f"  {BOLD}{BRIGHT_YELLOW}E.{RESET}  🗺️  World              {DIM}[Travel & daycare]{RESET}")
         print()
-        gym_badges_check = [b for b in badges if any(b == g[1]["badge"] for g in GYM_LEADERS.items())]
-        if len(gym_badges_check) >= len(GYM_LEADERS):
-            ef_status = f"{len(elite_four_defeated)}/5 beaten"
-            print(f"  {BOLD}{BRIGHT_YELLOW}20.{RESET} 👑 Elite Four          {DIM}[{ef_status}]{RESET}")
-            print()
-        print(f"  {BOLD}{DIM}{'21' if len(gym_badges_check) >= len(GYM_LEADERS) else '20'}.{RESET} 🚪 Save & Leave")
+        print(f"  {BOLD}{DIM}S.{RESET} 💾 Save & Leave")
         print()
         theme_divider(50)
-        max_option = 21 if len(gym_badges_check) >= len(GYM_LEADERS) else 20
-        option = crazy_int_input("What do you want to do now")
-        print()
+        category = crazy_input("Select category").strip().upper()
+        
+        # ══════════════════════════════════════
+        # CATEGORY A: ADVENTURE
+        # ══════════════════════════════════════
+        if category == "A":
+            clear_screen()
+            fancy_header("ADVENTURE", emoji="⚔️", width=50)
+            print(f"  {BOLD}{BRIGHT_RED}1.{RESET}  🌿 Catch Pokemon      {DIM}[Wild encounters]{RESET}")
+            print(f"  {BOLD}{BRIGHT_YELLOW}2.{RESET}  🏅 Gym Challenge      {DIM}[Badges: {len(badges)}/8]{RESET}")
+            print(f"  {BOLD}{BRIGHT_RED}3.{RESET}  🐛 Bug Hunt           {DIM}[Corrupted gauntlet]{RESET}")
+            print(f"  {BOLD}{BRIGHT_BLUE}4.{RESET}  🗺️  Travel              {DIM}[Change regions]{RESET}")
+            gym_badges_check_a = [b for b in badges if any(b == g[1]["badge"] for g in GYM_LEADERS.items())]
+            if len(gym_badges_check_a) >= len(GYM_LEADERS):
+                ef_status = f"{len(elite_four_defeated)}/5 beaten"
+                print(f"  {BOLD}{BRIGHT_YELLOW}5.{RESET}  👑 Elite Four         {DIM}[{ef_status}]{RESET}")
+            print()
+            print(f"  {BOLD}{DIM}Q.{RESET} Back")
+            adv_opt = crazy_input("Choose").strip()
+            if adv_opt == "1":
+                option = 1
+            elif adv_opt == "2":
+                option = 10
+            elif adv_opt == "3":
+                option = 15
+            elif adv_opt == "4":
+                option = 7
+            elif adv_opt == "5" and len(gym_badges_check_a) >= len(GYM_LEADERS):
+                option = 20
+            else:
+                option = 0
+                
+        # ══════════════════════════════════════
+        # CATEGORY B: COMPETITIVE
+        # ══════════════════════════════════════
+        elif category == "B":
+            clear_screen()
+            fancy_header("COMPETITIVE", emoji="🏆", width=50)
+            print(f"  {BOLD}{BRIGHT_YELLOW}1.{RESET}  🏟️  Arena               {DIM}[Battle trainers]{RESET}")
+            print(f"  {BOLD}{BRIGHT_CYAN}2.{RESET}  🗼 Battle Tower        {DIM}[Record: {tower_record}]{RESET}")
+            print(f"  {BOLD}{BRIGHT_RED}3.{RESET}  👑 Boss Raids          {DIM}[Legendary battles]{RESET}")
+            print(f"  {BOLD}{BRIGHT_MAGENTA}4.{RESET}  🏰 Dungeon Gauntlets  {DIM}[Endurance gauntlet]{RESET}")
+            print(f"  {BOLD}{BRIGHT_BLUE}5.{RESET}  📶 GTS & Ranked PvP   {DIM}[Online station]{RESET}")
+            print()
+            print(f"  {BOLD}{DIM}Q.{RESET} Back")
+            comp_opt = crazy_input("Choose").strip()
+            if comp_opt == "1":
+                option = 3
+            elif comp_opt == "2":
+                option = 11
+            elif comp_opt == "3":
+                option = 19
+            elif comp_opt == "4":
+                option = 18
+            elif comp_opt == "5":
+                option = 17
+            else:
+                option = 0
+                
+        # ══════════════════════════════════════
+        # CATEGORY C: MANAGEMENT
+        # ══════════════════════════════════════
+        elif category == "C":
+            clear_screen()
+            fancy_header("MANAGEMENT", emoji="🎒", width=50)
+            print(f"  {BOLD}{BRIGHT_GREEN}1.{RESET}  🏪 Shop               {DIM}[Buy items & tickets]{RESET}")
+            print(f"  {BOLD}{BRIGHT_MAGENTA}2.{RESET}  🏥 Hospital           {DIM}[Heal with tickets]{RESET}")
+            print(f"  {BOLD}{BRIGHT_BLUE}3.{RESET}  🎒 Bag                {DIM}[Use items]{RESET}")
+            print(f"  {BOLD}{BRIGHT_MAGENTA}4.{RESET}  🧬 Fusion Lab         {DIM}[Fuse Pokemon]{RESET}")
+            egg_notif = f" {BOLD}{BRIGHT_YELLOW}[☁️ Egg Ready!]{RESET}" if daycare.get("egg_waiting") else ""
+            print(f"  {BOLD}{BRIGHT_YELLOW}5.{RESET}  🏡 Daycare & Breeding {DIM}[Level & Breed]{RESET}{egg_notif}")
+            print(f"  {BOLD}{BRIGHT_WHITE}6.{RESET}  ⚙️  Settings            {DIM}[Customize UI]{RESET}")
+            print()
+            print(f"  {BOLD}{DIM}Q.{RESET} Back")
+            mgmt_opt = crazy_input("Choose").strip()
+            if mgmt_opt == "1":
+                option = 4
+            elif mgmt_opt == "2":
+                option = 5
+            elif mgmt_opt == "3":
+                option = 6
+            elif mgmt_opt == "4":
+                option = 12
+            elif mgmt_opt == "5":
+                option = 16
+            elif mgmt_opt == "6":
+                option = 8
+            else:
+                option = 0
+                
+        # ══════════════════════════════════════
+        # CATEGORY D: INFO & SOCIAL
+        # ══════════════════════════════════════
+        elif category == "D":
+            clear_screen()
+            fancy_header("INFO & SOCIAL", emoji="📊", width=50)
+            print(f"  {BOLD}{BRIGHT_CYAN}1.{RESET}  📊 Stats              {DIM}[View team]{RESET}")
+            print(f"  {BOLD}{BRIGHT_GREEN}2.{RESET}  📖 Pokedex            {DIM}[{len(pokedex_caught)} caught]{RESET}")
+            print(f"  {BOLD}{BRIGHT_GREEN}3.{RESET}  📋 Quest Board        {DIM}[{len(quest_manager.active)} active]{RESET}")
+            print(f"  {BOLD}{BRIGHT_CYAN}4.{RESET}  ☁️  Cloud Account       {DIM}[{cloud_username if cloud_token else 'Not logged in'}]{RESET}")
+            print(f"  {BOLD}{BRIGHT_MAGENTA}5.{RESET}  🤖 AI Chatbot         {DIM}[Ask questions]{RESET}")
+            print()
+            print(f"  {BOLD}{DIM}Q.{RESET} Back")
+            info_opt = crazy_input("Choose").strip()
+            if info_opt == "1":
+                option = 2
+            elif info_opt == "2":
+                option = 13
+            elif info_opt == "3":
+                option = 14
+            elif info_opt == "4":
+                option = 9
+            elif info_opt == "5":
+                option = 21
+            else:
+                option = 0
+                
+        # ══════════════════════════════════════
+        # CATEGORY E: WORLD
+        # ══════════════════════════════════════
+        elif category == "E":
+            clear_screen()
+            fancy_header("WORLD", emoji="🗺️", width=50)
+            print(f"  {BOLD}{BRIGHT_WHITE}1.{RESET}  🗺️  Travel              {DIM}[Change regions]{RESET}")
+            egg_notif_e = f" {BOLD}{BRIGHT_YELLOW}[☁️ Egg Ready!]{RESET}" if daycare.get("egg_waiting") else ""
+            print(f"  {BOLD}{BRIGHT_YELLOW}2.{RESET}  🏡 Daycare & Breeding {DIM}[Level & Breed]{RESET}{egg_notif_e}")
+            print()
+            print(f"  {BOLD}{DIM}Q.{RESET} Back")
+            world_opt = crazy_input("Choose").strip()
+            if world_opt == "1":
+                option = 7
+            elif world_opt == "2":
+                option = 16
+            else:
+                option = 0
+                
+        # ══════════════════════════════════════
+        # SAVE & LEAVE
+        # ══════════════════════════════════════
+        elif category == "S":
+            option = 22  # Will be mapped to save & quit
+        else:
+            option = 0
 
         # ══════════════════════════════════════
         # OPTION 1: CATCH POKEMON
@@ -1698,86 +1729,108 @@ try:
         # ══════════════════════════════════════
         if option == 9:
             clear_screen()
-            if not HAS_REQUESTS:
-                fancy_header("CLOUD ACCOUNT", emoji="☁️", width=50)
-                print(f"  {BRIGHT_RED}⚠️  Cloud features disabled — missing libraries.{RESET}")
-                print(f"  {DIM}Restart the game and install packages when prompted.{RESET}")
+            fancy_header("CLOUD ACCOUNT", emoji="☁️", width=50)
+            status = f"{BRIGHT_GREEN}{cloud_username}{RESET}" if cloud_token else f"{DIM}Not logged in{RESET}"
+            print(f"  {BOLD}Status: {status}{RESET}")
+            print()
+            print(f"  {BOLD}{BRIGHT_WHITE}1.{RESET} Register new account")
+            print(f"  {BOLD}{BRIGHT_WHITE}2.{RESET} Login")
+            print(f"  {BOLD}{BRIGHT_WHITE}3.{RESET} Push save to cloud")
+            print(f"  {BOLD}{BRIGHT_WHITE}4.{RESET} Pull save from cloud")
+            print(f"  {BOLD}{BRIGHT_WHITE}5.{RESET} View registered accounts")
+            print(f"  {BOLD}{BRIGHT_WHITE}6.{RESET} Logout")
+            print(f"  {BOLD}{DIM}Q.{RESET} Back")
+            cloud_opt = crazy_input("Choose")
+            if cloud_opt == "1":
+                username = crazy_input("Username").strip()
+                password = crazy_input("Password").strip()
+                try:
+                    r = robust_request("POST", f"{SERVER_URL}/register", json_data={"username": username, "password": password}, timeout=5)
+                    if r.status_code == 201:
+                        print(f"  {BRIGHT_GREEN}✅ {r.json().get('message', 'Account created!')}{RESET}")
+                    else:
+                        print(f"  {BRIGHT_RED}❌ {r.json().get('message', 'Error')}{RESET}")
+                except Exception as e:
+                    print(f"  {BRIGHT_RED}❌ Server error: {e}{RESET}")
                 crazy_input("Press Enter to continue")
-            else:
-                fancy_header("CLOUD ACCOUNT", emoji="☁️", width=50)
-                print(f"  {BOLD}{BRIGHT_WHITE}1.{RESET} Register new account")
-                print(f"  {BOLD}{BRIGHT_WHITE}2.{RESET} Login")
-                print(f"  {BOLD}{BRIGHT_WHITE}3.{RESET} Push save to cloud")
-                print(f"  {BOLD}{BRIGHT_WHITE}4.{RESET} Pull save from cloud")
-                print(f"  {BOLD}{BRIGHT_WHITE}5.{RESET} Logout")
-                print(f"  {BOLD}{DIM}Q.{RESET} Back")
-                cloud_opt = crazy_input("Choose")
-                if cloud_opt == "1":
-                    username = crazy_input("Username")
-                    password = crazy_input("Password")
-                    try:
-                        r = robust_request("POST", f"{SERVER_URL}/register", json_data={"username": username, "password": password}, timeout=5)
-                        if r.status_code == 201:
-                            print(f"  {BRIGHT_GREEN}✅ Account created!{RESET}")
+            elif cloud_opt == "2":
+                username = crazy_input("Username").strip()
+                password = crazy_input("Password").strip()
+                try:
+                    r = robust_request("POST", f"{SERVER_URL}/login", json_data={"username": username, "password": password}, timeout=5)
+                    if r.status_code == 200:
+                        cloud_token = r.json()["token"]
+                        cloud_username = r.json().get("username", username)
+                        print(f"  {BRIGHT_GREEN}✅ Logged in as {cloud_username}!{RESET}")
+                    else:
+                        print(f"  {BRIGHT_RED}❌ {r.json().get('message', 'Error')}{RESET}")
+                except Exception as e:
+                    print(f"  {BRIGHT_RED}❌ Server error: {e}{RESET}")
+                crazy_input("Press Enter to continue")
+            elif cloud_opt == "3" and cloud_token:
+                try:
+                    save_data = json.dumps({"name": name, "pokemon": pokemon, "money": money, "trophies": trophies, "inventory": inventory, "location": location, "badges": badges, "tower_record": tower_record, "pokedex_seen": list(pokedex_seen), "pokedex_caught": list(pokedex_caught), "elite_four_defeated": elite_four_defeated, "achievements": achievement_manager.to_dict(), "heal_tickets": heal_tickets, "daycare": daycare, "pvp_rp": pvp_rp})
+                    r = robust_request("POST", f"{SERVER_URL}/save", json_data={"save_data": save_data}, headers={"Authorization": f"Bearer {cloud_token}"}, timeout=5)
+                    if r.status_code == 200:
+                        print(f"  {BRIGHT_GREEN}✅ {r.json().get('message', 'Save pushed to cloud!')}{RESET}")
+                    else:
+                        print(f"  {BRIGHT_RED}❌ {r.json().get('message', 'Error')}{RESET}")
+                except Exception as e:
+                    print(f"  {BRIGHT_RED}❌ Server error: {e}{RESET}")
+                crazy_input("Press Enter to continue")
+            elif cloud_opt == "4" and cloud_token:
+                try:
+                    r = robust_request("GET", f"{SERVER_URL}/load", headers={"Authorization": f"Bearer {cloud_token}"}, timeout=5)
+                    if r.status_code == 200:
+                        data = json.loads(r.json()["save_data"])
+                        name = data.get("name", name)
+                        pokemon = data.get("pokemon", pokemon)
+                        money = data.get("money", money)
+                        trophies = data.get("trophies", trophies)
+                        inventory = data.get("inventory", inventory)
+                        location = data.get("location", location)
+                        badges = data.get("badges", badges)
+                        tower_record = data.get("tower_record", tower_record)
+                        pokedex_seen = set(data.get("pokedex_seen", []))
+                        pokedex_caught = set(data.get("pokedex_caught", []))
+                        elite_four_defeated = data.get("elite_four_defeated", [])
+                        ach_data = data.get("achievements", {"unlocked":[],"counters":{}})
+                        achievement_manager.__dict__.update(AchievementManager.from_dict(ach_data).__dict__)
+                        heal_tickets = data.get("heal_tickets", heal_tickets)
+                        daycare = data.get("daycare", daycare)
+                        pvp_rp = data.get("pvp_rp", pvp_rp)
+                        print(f"  {BRIGHT_GREEN}✅ Save loaded from cloud!{RESET}")
+                    else:
+                        print(f"  {BRIGHT_RED}❌ {r.json().get('message', 'Error')}{RESET}")
+                except Exception as e:
+                    print(f"  {BRIGHT_RED}❌ Server error: {e}{RESET}")
+                crazy_input("Press Enter to continue")
+            elif cloud_opt == "5":
+                clear_screen()
+                fancy_header("REGISTERED ACCOUNTS", emoji="👥", width=50)
+                try:
+                    r = robust_request("GET", f"{SERVER_URL}/accounts", timeout=5)
+                    if r.status_code == 200:
+                        accounts = r.json().get("accounts", [])
+                        total = r.json().get("total", 0)
+                        print(f"  {BOLD}{BRIGHT_CYAN}Total accounts: {total}{RESET}")
+                        print()
+                        if accounts:
+                            for i, acc in enumerate(accounts, 1):
+                                created = acc.get("created", "unknown")
+                                print(f"  {BOLD}{BRIGHT_WHITE}{i}.{RESET} {BRIGHT_GREEN}{acc['username']}{RESET} {DIM}(since {created}){RESET}")
                         else:
-                            print(f"  {BRIGHT_RED}❌ {r.json().get('message', 'Error')}{RESET}")
-                    except Exception as e:
-                        print(f"  {BRIGHT_RED}❌ Server error: {e}{RESET}")
-                    crazy_input("Press Enter to continue")
-                elif cloud_opt == "2":
-                    username = crazy_input("Username")
-                    password = crazy_input("Password")
-                    try:
-                        r = robust_request("POST", f"{SERVER_URL}/login", json_data={"username": username, "password": password}, timeout=5)
-                        if r.status_code == 200:
-                            cloud_token = r.json()["token"]
-                            cloud_username = username
-                            print(f"  {BRIGHT_GREEN}✅ Logged in as {username}!{RESET}")
-                        else:
-                            print(f"  {BRIGHT_RED}❌ {r.json().get('message', 'Error')}{RESET}")
-                    except Exception as e:
-                        print(f"  {BRIGHT_RED}❌ Server error: {e}{RESET}")
-                    crazy_input("Press Enter to continue")
-                elif cloud_opt == "3" and cloud_token:
-                    try:
-                        save_data = json.dumps({"name": name, "pokemon": pokemon, "money": money, "trophies": trophies, "inventory": inventory, "location": location, "badges": badges, "tower_record": tower_record, "pokedex_seen": list(pokedex_seen), "pokedex_caught": list(pokedex_caught), "elite_four_defeated": elite_four_defeated, "achievements": achievement_manager.to_dict()})
-                        r = robust_request("POST", f"{SERVER_URL}/save", json_data={"save_data": save_data}, headers={"Authorization": f"Bearer {cloud_token}"}, timeout=5)
-                        if r.status_code == 200:
-                            print(f"  {BRIGHT_GREEN}✅ Save pushed to cloud!{RESET}")
-                        else:
-                            print(f"  {BRIGHT_RED}❌ {r.json().get('message', 'Error')}{RESET}")
-                    except Exception as e:
-                        print(f"  {BRIGHT_RED}❌ Server error: {e}{RESET}")
-                    crazy_input("Press Enter to continue")
-                elif cloud_opt == "4" and cloud_token:
-                    try:
-                        r = robust_request("GET", f"{SERVER_URL}/load", headers={"Authorization": f"Bearer {cloud_token}"}, timeout=5)
-                        if r.status_code == 200:
-                            data = json.loads(r.json()["save_data"])
-                            name = data.get("name", name)
-                            pokemon = data.get("pokemon", pokemon)
-                            money = data.get("money", money)
-                            trophies = data.get("trophies", trophies)
-                            inventory = data.get("inventory", inventory)
-                            location = data.get("location", location)
-                            badges = data.get("badges", badges)
-                            tower_record = data.get("tower_record", tower_record)
-                            pokedex_seen = set(data.get("pokedex_seen", []))
-                            pokedex_caught = set(data.get("pokedex_caught", []))
-                            elite_four_defeated = data.get("elite_four_defeated", [])
-                            ach_data = data.get("achievements", {"unlocked":[],"counters":{}})
-                            achievement_manager.__dict__.update(AchievementManager.from_dict(ach_data).__dict__)
-                            print(f"  {BRIGHT_GREEN}✅ Save loaded from cloud!{RESET}")
-                        else:
-                            print(f"  {BRIGHT_RED}❌ {r.json().get('message', 'Error')}{RESET}")
-                    except Exception as e:
-                        print(f"  {BRIGHT_RED}❌ Server error: {e}{RESET}")
-                    crazy_input("Press Enter to continue")
-                elif cloud_opt == "5":
-                    cloud_token = None
-                    cloud_username = None
-                    print(f"  {BRIGHT_YELLOW}Logged out.{RESET}")
-                    crazy_input("Press Enter to continue")
+                            print(f"  {DIM}No accounts registered yet.{RESET}")
+                    else:
+                        print(f"  {BRIGHT_RED}❌ {r.json().get('message', 'Error')}{RESET}")
+                except Exception as e:
+                    print(f"  {BRIGHT_RED}❌ Server error: {e}{RESET}")
+                crazy_input("Press Enter to continue")
+            elif cloud_opt == "6":
+                cloud_token = None
+                cloud_username = None
+                print(f"  {BRIGHT_YELLOW}Logged out.{RESET}")
+                crazy_input("Press Enter to continue")
 
         # ══════════════════════════════════════
         # OPTION 10: GYM CHALLENGE
@@ -3164,6 +3217,58 @@ try:
 
             crazy_input("Press Enter to continue")
 
+        # ══════════════════════════════════════
+        # OPTION 21: AI CHATBOT
+        # ══════════════════════════════════════
+        if option == 21:
+            clear_screen()
+            try:
+                from AI.chatbot import PokemonChatbot
+                chatbot = PokemonChatbot()
+                fancy_header("AI POKEMON CHATBOT", emoji="🤖", width=50)
+                print(f"  {DIM}Ask me anything about Pokemon, math, science, or game tips!{RESET}")
+                print(f"  {DIM}Type 'quit' or 'exit' to leave.{RESET}")
+                print()
+                print(f"  {BRIGHT_GREEN}{chatbot.greet()}{RESET}")
+                print()
+                while True:
+                    user_msg = crazy_input("You").strip()
+                    if user_msg.lower() in ("quit", "exit", "q", "bye"):
+                        print(f"  {BRIGHT_YELLOW}{chatbot.say_goodbye()}{RESET}")
+                        break
+                    if not user_msg:
+                        continue
+                    response = chatbot.respond(user_msg)
+                    print(f"  {BRIGHT_CYAN}🤖 {response}{RESET}")
+                    print()
+            except ImportError:
+                fancy_header("AI CHATBOT", emoji="🤖", width=50)
+                print(f"  {BRIGHT_RED}⚠️  Chatbot module not found.{RESET}")
+                print(f"  {DIM}Make sure the AI/ folder exists with chatbot.py{RESET}")
+            except Exception as e:
+                fancy_header("AI CHATBOT", emoji="🤖", width=50)
+                print(f"  {BRIGHT_RED}❌ Chatbot error: {e}{RESET}")
+            crazy_input("Press Enter to continue")
+
+        # ══════════════════════════════════════
+        # OPTION 22: SAVE & LEAVE
+        # ══════════════════════════════════════
+        if option == 22:
+            # Push save to cloud before leaving
+            if cloud_token:
+                try:
+                    print(f"  {DIM}☁️  Saving to cloud...{RESET}")
+                    save_data = json.dumps({"name": name, "pokemon": pokemon, "money": money, "pvp_rp": pvp_rp, "trophies": trophies, "inventory": inventory, "location": location, "badges": badges, "tower_record": tower_record, "pokedex_seen": list(pokedex_seen), "pokedex_caught": list(pokedex_caught), "elite_four_defeated": elite_four_defeated, "achievements": achievement_manager.to_dict(), "heal_tickets": heal_tickets, "daycare": daycare})
+                    r = robust_request("POST", f"{SERVER_URL}/save", json_data={"save_data": save_data}, headers={"Authorization": f"Bearer {cloud_token}"}, timeout=5)
+                    if r.status_code == 200:
+                        print(f"  {BRIGHT_GREEN}✅ Game saved to cloud!{RESET}")
+                    else:
+                        print(f"  {BRIGHT_RED}❌ Cloud save failed: {r.json().get('message', 'Error')}{RESET}")
+                except Exception as e:
+                    print(f"  {BRIGHT_RED}❌ Cloud save error: {e}{RESET}")
+            time.sleep(1)
+            break
+
 except Exception as e:
     print()
     print_art(SAVING_ART, lambda t: glitch_text(t))
@@ -3173,30 +3278,33 @@ except Exception as e:
     import traceback
     traceback.print_exc()
     print()
-    ans = crazy_input("Would you like to save your game before closing? (y/n)")
-    if ans.lower() == 'y':
-        if save_game(name, pokemon, money, heal_tickets, trophies, inventory, location, badges, tower_record, pokedex_seen, pokedex_caught, elite_four_defeated, achievement_manager.to_dict(), daycare=daycare, pvp_rp=pvp_rp):
-            print(f"  {BOLD}{BRIGHT_GREEN}💾 Game saved! Come back anytime!{RESET}")
-        time.sleep(1)
-
-# ══════════════════════════════════════
-# SAVE ON EXIT
-# ══════════════════════════════════════
-if save_game(name, pokemon, money, heal_tickets, trophies, inventory, location, badges, tower_record, pokedex_seen, pokedex_caught, elite_four_defeated, achievement_manager.to_dict(), daycare=daycare, pvp_rp=pvp_rp):
-    print(f"  {BOLD}{BRIGHT_GREEN}✅ Game saved successfully locally!{RESET}")
     if cloud_token:
         try:
-            print(f"  {DIM}☁️  Auto-pushing save to cloud...{RESET}")
-            save_data = json.dumps({"name": name, "pokemon": pokemon, "money": money, "pvp_rp": pvp_rp, "trophies": trophies, "inventory": inventory, "location": location, "badges": badges, "tower_record": tower_record, "pokedex_seen": list(pokedex_seen), "pokedex_caught": list(pokedex_caught), "elite_four_defeated": elite_four_defeated, "achievements": achievement_manager.to_dict(), "daycare": daycare})
+            print(f"  {DIM}☁️  Emergency cloud save...{RESET}")
+            save_data = json.dumps({"name": name, "pokemon": pokemon, "money": money, "pvp_rp": pvp_rp, "trophies": trophies, "inventory": inventory, "location": location, "badges": badges, "tower_record": tower_record, "pokedex_seen": list(pokedex_seen), "pokedex_caught": list(pokedex_caught), "elite_four_defeated": elite_four_defeated, "achievements": achievement_manager.to_dict(), "heal_tickets": heal_tickets, "daycare": daycare})
             r = robust_request("POST", f"{SERVER_URL}/save", json_data={"save_data": save_data}, headers={"Authorization": f"Bearer {cloud_token}"}, timeout=5)
             if r.status_code == 200:
-                print(f"  {BRIGHT_GREEN}✅ Cloud save updated!{RESET}")
+                print(f"  {BRIGHT_GREEN}✅ Emergency cloud save successful!{RESET}")
             else:
-                print(f"  {BRIGHT_RED}❌ Cloud save failed: {r.json().get('message', 'Error')}{RESET}")
-        except Exception as e:
-            print(f"  {BRIGHT_RED}❌ Cloud auto-push server error: {e}{RESET}")
-else:
-    print(f"  {BOLD}{BRIGHT_RED}❌ Failed to save!{RESET}")
+                print(f"  {BRIGHT_RED}❌ Emergency cloud save failed!{RESET}")
+        except:
+            print(f"  {BRIGHT_RED}❌ Could not save to cloud!{RESET}")
+    time.sleep(1)
+
+# ══════════════════════════════════════
+# CLOUD SAVE ON EXIT
+# ══════════════════════════════════════
+if cloud_token:
+    try:
+        print(f"  {DIM}☁️  Auto-saving to cloud...{RESET}")
+        save_data = json.dumps({"name": name, "pokemon": pokemon, "money": money, "pvp_rp": pvp_rp, "trophies": trophies, "inventory": inventory, "location": location, "badges": badges, "tower_record": tower_record, "pokedex_seen": list(pokedex_seen), "pokedex_caught": list(pokedex_caught), "elite_four_defeated": elite_four_defeated, "achievements": achievement_manager.to_dict(), "heal_tickets": heal_tickets, "daycare": daycare})
+        r = robust_request("POST", f"{SERVER_URL}/save", json_data={"save_data": save_data}, headers={"Authorization": f"Bearer {cloud_token}"}, timeout=5)
+        if r.status_code == 200:
+            print(f"  {BRIGHT_GREEN}✅ Cloud save updated!{RESET}")
+        else:
+            print(f"  {BRIGHT_RED}❌ Cloud save failed: {r.json().get('message', 'Error')}{RESET}")
+    except Exception as e:
+        print(f"  {BRIGHT_RED}❌ Cloud auto-save error: {e}{RESET}")
 time.sleep(1)
 
 print()
