@@ -114,7 +114,7 @@ daily_species_caught = set()
 # Battle Frontier progress
 frontier_progress = {}
 
-def robust_request(method, url, json_data=None, headers=None, timeout=5):
+def robust_request(method, url, json_data=None, headers=None, timeout=30):
     """Make HTTP requests to the cloud server. No local fallback."""
     if method == "POST":
         return requests.post(url, json=json_data, headers=headers, timeout=timeout)
@@ -123,36 +123,29 @@ def robust_request(method, url, json_data=None, headers=None, timeout=5):
 
 def is_server_running():
     try:
-        r = requests.get(f"{SERVER_URL}/health", timeout=1)
-        return True
+        r = requests.get(f"{SERVER_URL}/health", timeout=10)
+        return r.status_code == 200
     except:
         return False
 
-def start_server():
+# ══════════════════════════════════════════════════
+# CHECK CLOUD SERVER (Render)
+# ══════════════════════════════════════════════════
+print(f"  {DIM}☁️  Connecting to cloud server...{RESET}")
+print(f"  {DIM}   (Free tier may take up to 60s to wake up){RESET}")
+server_ready = False
+for attempt in range(12):
     if is_server_running():
-        return
-    try:
-        server_path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "utils", "server.py")
-        subprocess.Popen([sys.executable, server_path], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-        for _ in range(20):
-            time.sleep(0.2)
-            if is_server_running():
-                return
-    except:
-        pass
+        server_ready = True
+        break
+    print(f"  {DIM}   Waiting... ({(attempt+1)*5}s){RESET}")
+    time.sleep(5)
 
-    start_server()
-
-# ══════════════════════════════════════════════════
-# START CLOUD SERVER
-# ══════════════════════════════════════════════════
-print(f"  {DIM}☁️  Starting cloud server...{RESET}")
-start_server()
-if not is_server_running():
-    print(f"  {BRIGHT_RED}❌ Failed to start cloud server. Cannot play offline.{RESET}")
+if not server_ready:
+    print(f"  {BRIGHT_RED}❌ Cannot connect to cloud server. Exiting...{RESET}")
     time.sleep(2)
     sys.exit(0)
-print(f"  {BRIGHT_GREEN}✅ Cloud server running!{RESET}")
+print(f"  {BRIGHT_GREEN}✅ Cloud server connected!{RESET}")
 time.sleep(0.5)
 
 # ══════════════════════════════════════════════════
@@ -196,13 +189,13 @@ if gateway_opt == "1":
     username = crazy_input("Username").strip()
     password = crazy_input("Password").strip()
     try:
-        r = robust_request("POST", f"{SERVER_URL}/login", json_data={"username": username, "password": password}, timeout=5)
+        r = robust_request("POST", f"{SERVER_URL}/login", json_data={"username": username, "password": password}, timeout=30)
         if r.status_code == 200:
             cloud_token = r.json()["token"]
             cloud_username = r.json().get("username", username)
             print(f"\n  {BRIGHT_GREEN}✅ Logged in successfully as {cloud_username}!{RESET}")
             # Try to pull save data immediately
-            pull_r = robust_request("GET", f"{SERVER_URL}/load", headers={"Authorization": f"Bearer {cloud_token}"}, timeout=5)
+            pull_r = robust_request("GET", f"{SERVER_URL}/load", headers={"Authorization": f"Bearer {cloud_token}"}, timeout=30)
             if pull_r.status_code == 200:
                 data = json.loads(pull_r.json()["save_data"])
                 print(f"  {BOLD}{BRIGHT_YELLOW}💾 Cloud save file found for {cloud_username}!{RESET}")
@@ -252,10 +245,10 @@ elif gateway_opt == "2":
     username = crazy_input("Choose Username").strip()
     password = crazy_input("Choose Password").strip()
     try:
-        r = robust_request("POST", f"{SERVER_URL}/register", json_data={"username": username, "password": password}, timeout=5)
+        r = robust_request("POST", f"{SERVER_URL}/register", json_data={"username": username, "password": password}, timeout=30)
         if r.status_code == 201:
             print(f"\n  {BRIGHT_GREEN}✅ Account created successfully!{RESET}")
-            login_r = robust_request("POST", f"{SERVER_URL}/login", json_data={"username": username, "password": password}, timeout=5)
+            login_r = robust_request("POST", f"{SERVER_URL}/login", json_data={"username": username, "password": password}, timeout=30)
             if login_r.status_code == 200:
                 cloud_token = login_r.json()["token"]
                 cloud_username = login_r.json().get("username", username)
@@ -1856,7 +1849,7 @@ try:
                 username = crazy_input("Username").strip()
                 password = crazy_input("Password").strip()
                 try:
-                    r = robust_request("POST", f"{SERVER_URL}/register", json_data={"username": username, "password": password}, timeout=5)
+                    r = robust_request("POST", f"{SERVER_URL}/register", json_data={"username": username, "password": password}, timeout=30)
                     if r.status_code == 201:
                         print(f"  {BRIGHT_GREEN}✅ {r.json().get('message', 'Account created!')}{RESET}")
                     else:
@@ -1868,7 +1861,7 @@ try:
                 username = crazy_input("Username").strip()
                 password = crazy_input("Password").strip()
                 try:
-                    r = robust_request("POST", f"{SERVER_URL}/login", json_data={"username": username, "password": password}, timeout=5)
+        r = robust_request("POST", f"{SERVER_URL}/login", json_data={"username": username, "password": password}, timeout=30)
                     if r.status_code == 200:
                         cloud_token = r.json()["token"]
                         cloud_username = r.json().get("username", username)
@@ -1881,7 +1874,7 @@ try:
             elif cloud_opt == "3" and cloud_token:
                 try:
                     save_data = json.dumps({"name": name, "pokemon": pokemon, "money": money, "trophies": trophies, "inventory": inventory, "location": location, "badges": badges, "tower_record": tower_record, "pokedex_seen": list(pokedex_seen), "pokedex_caught": list(pokedex_caught), "elite_four_defeated": elite_four_defeated, "achievements": achievement_manager.to_dict(), "heal_tickets": heal_tickets, "daycare": daycare, "pvp_rp": pvp_rp, "shiny_chain": shiny_chain, "last_encounter_species": last_encounter_species, "login_streak": login_streak, "last_login_date": last_login_date, "daily_raid_completed": daily_raid_completed, "daily_species_caught": list(daily_species_caught), "frontier_progress": frontier_progress})
-                    r = robust_request("POST", f"{SERVER_URL}/save", json_data={"save_data": save_data}, headers={"Authorization": f"Bearer {cloud_token}"}, timeout=5)
+                    r = robust_request("POST", f"{SERVER_URL}/save", json_data={"save_data": save_data}, headers={"Authorization": f"Bearer {cloud_token}"}, timeout=30)
                     if r.status_code == 200:
                         print(f"  {BRIGHT_GREEN}✅ {r.json().get('message', 'Save pushed to cloud!')}{RESET}")
                     else:
@@ -1891,7 +1884,7 @@ try:
                 crazy_input("Press Enter to continue")
             elif cloud_opt == "4" and cloud_token:
                 try:
-                    r = robust_request("GET", f"{SERVER_URL}/load", headers={"Authorization": f"Bearer {cloud_token}"}, timeout=5)
+                    r = robust_request("GET", f"{SERVER_URL}/load", headers={"Authorization": f"Bearer {cloud_token}"}, timeout=30)
                     if r.status_code == 200:
                         data = json.loads(r.json()["save_data"])
                         name = data.get("name", name)
@@ -1920,7 +1913,7 @@ try:
                 clear_screen()
                 fancy_header("REGISTERED ACCOUNTS", emoji="👥", width=50)
                 try:
-                    r = robust_request("GET", f"{SERVER_URL}/accounts", timeout=5)
+                    r = robust_request("GET", f"{SERVER_URL}/accounts", timeout=30)
                     if r.status_code == 200:
                         accounts = r.json().get("accounts", [])
                         total = r.json().get("total", 0)
@@ -3702,7 +3695,7 @@ try:
                 try:
                     print(f"  {DIM}☁️  Saving to cloud...{RESET}")
                     save_data = json.dumps({"name": name, "pokemon": pokemon, "money": money, "pvp_rp": pvp_rp, "trophies": trophies, "inventory": inventory, "location": location, "badges": badges, "tower_record": tower_record, "pokedex_seen": list(pokedex_seen), "pokedex_caught": list(pokedex_caught), "elite_four_defeated": elite_four_defeated, "achievements": achievement_manager.to_dict(), "heal_tickets": heal_tickets, "daycare": daycare})
-                    r = robust_request("POST", f"{SERVER_URL}/save", json_data={"save_data": save_data}, headers={"Authorization": f"Bearer {cloud_token}"}, timeout=5)
+                    r = robust_request("POST", f"{SERVER_URL}/save", json_data={"save_data": save_data}, headers={"Authorization": f"Bearer {cloud_token}"}, timeout=30)
                     if r.status_code == 200:
                         print(f"  {BRIGHT_GREEN}✅ Game saved to cloud!{RESET}")
                     else:
@@ -3725,7 +3718,7 @@ except Exception as e:
         try:
             print(f"  {DIM}☁️  Emergency cloud save...{RESET}")
             save_data = json.dumps({"name": name, "pokemon": pokemon, "money": money, "pvp_rp": pvp_rp, "trophies": trophies, "inventory": inventory, "location": location, "badges": badges, "tower_record": tower_record, "pokedex_seen": list(pokedex_seen), "pokedex_caught": list(pokedex_caught), "elite_four_defeated": elite_four_defeated, "achievements": achievement_manager.to_dict(), "heal_tickets": heal_tickets, "daycare": daycare})
-            r = robust_request("POST", f"{SERVER_URL}/save", json_data={"save_data": save_data}, headers={"Authorization": f"Bearer {cloud_token}"}, timeout=5)
+            r = robust_request("POST", f"{SERVER_URL}/save", json_data={"save_data": save_data}, headers={"Authorization": f"Bearer {cloud_token}"}, timeout=30)
             if r.status_code == 200:
                 print(f"  {BRIGHT_GREEN}✅ Emergency cloud save successful!{RESET}")
             else:
@@ -3741,7 +3734,7 @@ if cloud_token:
     try:
         print(f"  {DIM}☁️  Auto-saving to cloud...{RESET}")
         save_data = json.dumps({"name": name, "pokemon": pokemon, "money": money, "pvp_rp": pvp_rp, "trophies": trophies, "inventory": inventory, "location": location, "badges": badges, "tower_record": tower_record, "pokedex_seen": list(pokedex_seen), "pokedex_caught": list(pokedex_caught), "elite_four_defeated": elite_four_defeated, "achievements": achievement_manager.to_dict(), "heal_tickets": heal_tickets, "daycare": daycare})
-        r = robust_request("POST", f"{SERVER_URL}/save", json_data={"save_data": save_data}, headers={"Authorization": f"Bearer {cloud_token}"}, timeout=5)
+        r = robust_request("POST", f"{SERVER_URL}/save", json_data={"save_data": save_data}, headers={"Authorization": f"Bearer {cloud_token}"}, timeout=30)
         if r.status_code == 200:
             print(f"  {BRIGHT_GREEN}✅ Cloud save updated!{RESET}")
         else:
