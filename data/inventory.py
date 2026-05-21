@@ -148,6 +148,11 @@ ITEMS = {
         "price": 800,
         "description": "Boosts Electric moves by 20%.",
         "effect": {"type": "held_item"}
+    },
+    "Shiny Charm": {
+        "price": 10000,
+        "description": "A magical charm that doubles shiny encounter rates. Passive effect.",
+        "effect": {"type": "shiny_charm"}
     }
 }
 

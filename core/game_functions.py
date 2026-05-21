@@ -15,7 +15,34 @@ import time
 import sys
 
 
-def get_wild_pokemon(level, region="Grasslands"):
+def get_shiny_rate(chain=0, has_shiny_charm=False, is_masuda=False, is_egg=False):
+    """Calculate shiny encounter rate based on chain, shiny charm, and masuda method.
+    Base rate: 1/100 for wild, 1/128 for eggs.
+    Chain bonus: +1% per 5 chain (max +20% at 100 chain).
+    Shiny Charm: doubles the rate.
+    Masuda method: triples the rate (stacks multiplicatively with charm).
+    """
+    if is_egg:
+        base_rate = 1.0 / 128.0
+    else:
+        base_rate = 1.0 / 100.0
+    
+    # Chain bonus: +1% per 5 consecutive encounters of same species
+    chain_bonus = min(chain // 5, 20) / 100.0  # max +20% at 100 chain
+    rate = base_rate + chain_bonus
+    
+    # Shiny Charm doubles the rate
+    if has_shiny_charm:
+        rate *= 2.0
+    
+    # Masuda method triples the rate (for breeding)
+    if is_masuda:
+        rate *= 3.0
+    
+    return min(rate, 0.5)  # cap at 50% max
+
+
+def get_wild_pokemon(level, region="Grasslands", chain=0, has_shiny_charm=False):
     """Get a random wild pokemon and its stats based on level and region."""
     region_data = REGIONS.get(region, REGIONS["Grasslands"])
     possible_spawns = region_data["spawns"]
@@ -38,10 +65,11 @@ def get_wild_pokemon(level, region="Grasslands"):
     enemymoves = dex_entry.get("moves", ["Tackle"])
     enemyspeed = dex_entry.get("speed", 50) + (level // 4)
     
-    # SHINY CHECK (1/100)
-    is_shiny = random.random() < 0.01
+    # SHINY CHECK with chain and shiny charm bonuses
+    shiny_rate = get_shiny_rate(chain=chain, has_shiny_charm=has_shiny_charm)
+    is_shiny = random.random() < shiny_rate
     
-    return wild, enemyhp, enemydm, enemytype, enemymoves, is_shiny, enemyspeed
+    return wild, enemyhp, enemydm, enemytype, enemymoves, is_shiny, enemyspeed, shiny_rate
 
 
 def get_arena_pokemon(level):

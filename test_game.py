@@ -391,15 +391,16 @@ def test_phase2_battle():
         
         # 2.8 Wild pokemon generation
         result = get_wild_pokemon(5)
-        assert isinstance(result, tuple) and len(result) == 7
-        name, hp, dm, ptype, moves, shiny, speed = result
+        assert isinstance(result, tuple) and len(result) == 8
+        name, hp, dm, ptype, moves, shiny, speed, shiny_rate = result
         assert isinstance(name, str) and len(name) > 0
         assert isinstance(hp, int) and hp > 0
         assert isinstance(dm, int) and dm > 0
         assert isinstance(speed, int) and speed > 0
         assert isinstance(moves, list) and len(moves) > 0
         assert isinstance(shiny, bool)
-        results.pass_test(f"get_wild_pokemon: returns valid data ({name}, hp={hp}, dm={dm}, speed={speed})")
+        assert isinstance(shiny_rate, float) and shiny_rate > 0
+        results.pass_test(f"get_wild_pokemon: returns valid data ({name}, hp={hp}, dm={dm}, speed={speed}, rate={shiny_rate:.4f})")
     except Exception as e:
         results.fail_test("get_wild_pokemon", str(e))
     

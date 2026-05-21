@@ -73,7 +73,16 @@ from time_system import (HOUR, get_period, get_time_name, advance_time,
 from game_functions import (
     apply_entry_abilities, apply_item_turn_trigger, apply_hp_threshold_items,
     apply_status_items, apply_ko_ability, apply_contact_abilities,
-    apply_item_after_attack, format_type
+    apply_item_after_attack, format_type, get_shiny_rate
+)
+from daily_challenges import (
+    get_daily_challenge, get_login_streak, get_streak_bonus,
+    check_daily_species_catch, check_type_bonus
+)
+from battle_frontier import (
+    BATTLE_FRONTIER, RENTAL_POKEMON, BATTLE_HALL_OPPONENTS,
+    get_rental_team, get_pike_room, get_battle_hall_order,
+    get_frontier_progress, update_frontier_progress, count_frontier_symbols
 )
 pokemon = {}
 money = 500
@@ -90,6 +99,20 @@ elite_four_defeated = []
 cloud_token = None
 cloud_username = None
 SERVER_URL = "http://localhost:5001/api"
+
+# Shiny hunting system
+shiny_chain = 0
+last_encounter_species = None
+
+# Daily challenge system
+daily_challenge = get_daily_challenge()
+login_streak = 0
+last_login_date = None
+daily_raid_completed = False
+daily_species_caught = set()
+
+# Battle Frontier progress
+frontier_progress = {}
 
 def robust_request(method, url, json_data=None, headers=None, timeout=5):
     """Make HTTP requests to the cloud server. No local fallback."""
@@ -201,6 +224,13 @@ if gateway_opt == "1":
                     achievement_manager.__dict__.update(AchievementManager.from_dict(ach_data).__dict__)
                     heal_tickets = data.get("heal_tickets", 50)
                     daycare = data.get("daycare", {"slots": [], "steps": 0, "egg_waiting": False})
+                    shiny_chain = data.get("shiny_chain", 0)
+                    last_encounter_species = data.get("last_encounter_species", None)
+                    login_streak = data.get("login_streak", 0)
+                    last_login_date = data.get("last_login_date", None)
+                    daily_raid_completed = data.get("daily_raid_completed", False)
+                    daily_species_caught = set(data.get("daily_species_caught", []))
+                    frontier_progress = data.get("frontier_progress", {})
                     load_success = True
                     print(f"\n  {BOLD}{BRIGHT_GREEN}✅ Game Loaded Successfully from Cloud!{RESET}")
                     time.sleep(1)
@@ -254,6 +284,37 @@ if not load_success:
     print()
     pokeball_loading("Creating new trainer profile", duration=1.0)
     print()
+
+# Login streak handling
+from datetime import datetime
+today_str = datetime.now().strftime("%Y-%m-%d")
+streak_result = get_login_streak(last_login_date)
+if streak_result is not None:
+    login_streak = streak_result
+if last_login_date != today_str:
+    login_streak += 1
+    last_login_date = today_str
+    # Show streak bonus
+    bonus = get_streak_bonus(login_streak)
+    if login_streak > 1:
+        clear_screen()
+        fancy_header("LOGIN STREAK!", emoji="🔥", width=50)
+        print(f"  {BOLD}{BRIGHT_YELLOW}{bonus['desc']}{RESET}")
+        print(f"  {BOLD}{BRIGHT_GREEN}+{bonus['coins']} coins{RESET}")
+        print(f"  {BOLD}{BRIGHT_CYAN}+{bonus['tickets']} heal tickets{RESET}")
+        if bonus['item']:
+            print(f"  {BOLD}{BRIGHT_MAGENTA}+ {bonus['item']}{RESET}")
+        money += bonus['coins']
+        heal_tickets += bonus['tickets']
+        if bonus['item']:
+            inventory[bonus['item']] = inventory.get(bonus['item'], 0) + 1
+        print()
+        crazy_input("Press Enter to continue")
+    
+    # Reset daily raid on new day
+    daily_raid_completed = False
+    daily_species_caught = set()
+    daily_challenge = get_daily_challenge()
 
     if name == "Ash":
         print_art(PIKACHU_ART, electric_text)
@@ -472,7 +533,12 @@ try:
             # Determine species
             roll = random.random()
             is_fusion = False
-            shiny_roll = random.random() < (1.0 / 128.0) # 1/128 shiny odds for eggs!
+            
+            # Masuda method: different species parents = tripled shiny rate
+            is_masuda = (p1_clean != p2_clean)
+            has_shiny_charm = inventory.get("Shiny Charm", 0) > 0
+            shiny_rate = get_shiny_rate(chain=0, has_shiny_charm=has_shiny_charm, is_masuda=is_masuda, is_egg=True)
+            shiny_roll = random.random() < shiny_rate
             
             # Helper to strip numbers for species lookup
             def clean_species_name(nm):
@@ -535,7 +601,12 @@ try:
             
             shiny_tag = f" {BRIGHT_YELLOW}✨SHINY✨{RESET}" if shiny_roll else ""
             fusion_tag = f" {BRIGHT_CYAN}[FUSION]{RESET}" if is_fusion else ""
-            print(f"\n  🎉 {BOLD}{BRIGHT_GREEN}Congratulations! A {rainbow_text(baby_name.upper())}{shiny_tag}{fusion_tag} hatched from the Egg!{RESET}")
+            masuda_tag = f" {BRIGHT_MAGENTA}[Masuda]{RESET}" if is_masuda else ""
+            print(f"\n  🎉 {BOLD}{BRIGHT_GREEN}Congratulations! A {rainbow_text(baby_name.upper())}{shiny_tag}{fusion_tag}{masuda_tag} hatched from the Egg!{RESET}")
+            if is_masuda:
+                print(f"  {DIM}🌍 Masuda Method bonus applied! (3x shiny rate){RESET}")
+            if has_shiny_charm:
+                print(f"  {DIM}🍀 Shiny Charm bonus applied! (2x shiny rate){RESET}")
             print()
             stat_card(final_key, baby_stats["hp"], baby_stats["maxhp"], baby_stats["dm"], baby_stats["xp"], baby_stats["maxxp"], baby_stats["lvl"], speed=baby_stats.get("speed", 50))
             print()
@@ -566,7 +637,12 @@ try:
             f"🎫 TICKETS: {heal_tickets:>3} tickets\n"
             f"🏆 TROPHIES: {trophies:>4} trophies"
         )
-        render_panel_grid([p_left, p_right], width=56)
+        p_daily = (
+            f"🔥 STREAK: {login_streak} days\n"
+            f"🎯 DAILY: {daily_challenge['daily_species'][0]}\n"
+            f"👑 RAID: {'✅' if daily_raid_completed else '⬜'} {daily_challenge['daily_raid']['name']}"
+        )
+        render_panel_grid([p_left, p_right, p_daily], width=56)
         print()
         print(f"  {BOLD}{BRIGHT_RED}A.{RESET}  ⚔️  Adventure           {DIM}[Explore & battle]{RESET}")
         print(f"  {BOLD}{BRIGHT_CYAN}B.{RESET}  🏆 Competitive        {DIM}[Towers, raids & PvP]{RESET}")
@@ -589,10 +665,12 @@ try:
             print(f"  {BOLD}{BRIGHT_YELLOW}2.{RESET}  🏅 Gym Challenge      {DIM}[Badges: {len(badges)}/8]{RESET}")
             print(f"  {BOLD}{BRIGHT_RED}3.{RESET}  🐛 Bug Hunt           {DIM}[Corrupted gauntlet]{RESET}")
             print(f"  {BOLD}{BRIGHT_BLUE}4.{RESET}  🗺️  Travel              {DIM}[Change regions]{RESET}")
+            raid_status = "✅ Done" if daily_raid_completed else "Available"
+            print(f"  {BOLD}{BRIGHT_MAGENTA}5.{RESET}  📅 Daily Challenge    {DIM}[{raid_status}]{RESET}")
             gym_badges_check_a = [b for b in badges if any(b == g[1]["badge"] for g in GYM_LEADERS.items())]
             if len(gym_badges_check_a) >= len(GYM_LEADERS):
                 ef_status = f"{len(elite_four_defeated)}/5 beaten"
-                print(f"  {BOLD}{BRIGHT_YELLOW}5.{RESET}  👑 Elite Four         {DIM}[{ef_status}]{RESET}")
+                print(f"  {BOLD}{BRIGHT_YELLOW}6.{RESET}  👑 Elite Four         {DIM}[{ef_status}]{RESET}")
             print()
             print(f"  {BOLD}{DIM}Q.{RESET} Back")
             adv_opt = crazy_input("Choose").strip()
@@ -601,11 +679,13 @@ try:
             elif adv_opt == "2":
                 option = 10
             elif adv_opt == "3":
-                option = 15
+                option = 12
             elif adv_opt == "4":
                 option = 7
-            elif adv_opt == "5" and len(gym_badges_check_a) >= len(GYM_LEADERS):
-                option = 20
+            elif adv_opt == "5":
+                option = 23  # Daily challenge
+            elif adv_opt == "6" and len(gym_badges_check_a) >= len(GYM_LEADERS):
+                option = 20  # Elite Four
             else:
                 option = 0
                 
@@ -620,6 +700,8 @@ try:
             print(f"  {BOLD}{BRIGHT_RED}3.{RESET}  👑 Boss Raids          {DIM}[Legendary battles]{RESET}")
             print(f"  {BOLD}{BRIGHT_MAGENTA}4.{RESET}  🏰 Dungeon Gauntlets  {DIM}[Endurance gauntlet]{RESET}")
             print(f"  {BOLD}{BRIGHT_BLUE}5.{RESET}  📶 GTS & Ranked PvP   {DIM}[Online station]{RESET}")
+            symbols = count_frontier_symbols({"frontier_progress": frontier_progress})
+            print(f"  {BOLD}{BRIGHT_YELLOW}6.{RESET}  🎪 Battle Frontier    {DIM}[{symbols}/7 Symbols]{RESET}")
             print()
             print(f"  {BOLD}{DIM}Q.{RESET} Back")
             comp_opt = crazy_input("Choose").strip()
@@ -633,6 +715,8 @@ try:
                 option = 18
             elif comp_opt == "5":
                 option = 17
+            elif comp_opt == "6":
+                option = 24  # Battle Frontier
             else:
                 option = 0
                 
@@ -728,10 +812,23 @@ try:
             clear_screen()
             hit = 0
             level = random.randint(1, 40)
-            wild, enemyhp, enemydm, enemytype, enemymoves, is_shiny, enemyspeed = get_wild_pokemon(level, location)
+            
+            # Check for Shiny Charm
+            has_shiny_charm = inventory.get("Shiny Charm", 0) > 0
+            
+            # Get wild pokemon with chain and shiny charm bonuses
+            result = get_wild_pokemon(level, location, chain=shiny_chain, has_shiny_charm=has_shiny_charm)
+            wild, enemyhp, enemydm, enemytype, enemymoves, is_shiny, enemyspeed, shiny_rate = result
             pokedex_seen.add(wild.lower())
             original_enemyhp = enemyhp
             enemy_status = None
+            
+            # Update chain tracking
+            if wild.lower() == last_encounter_species:
+                shiny_chain += 1
+            else:
+                shiny_chain = 1
+                last_encounter_species = wild.lower()
             battle_weather = get_random_weather()
 
             wipe_transition(width=50)
@@ -754,6 +851,14 @@ try:
             electric_box(f"{wild.upper()}{shiny_tag} — HP: {enemyhp} | DM: {enemydm} | Type: {format_type(enemytype)}", width=50)
             if battle_weather != "Clear":
                 print(f"  {BOLD}{BRIGHT_CYAN}🌤️  Weather: {battle_weather}{RESET}")
+            
+            # Show shiny chain and odds
+            chain_bonus = min(shiny_chain // 5, 20)
+            base_odds = "1/100"
+            charm_tag = f" {BRIGHT_MAGENTA}🍀Shiny Charm{RESET}" if has_shiny_charm else ""
+            print(f"  {BOLD}{BRIGHT_YELLOW}🔗 Chain: {shiny_chain}{RESET}{charm_tag}  {DIM}Odds: ~1/{int(1/shiny_rate)}{RESET}")
+            if shiny_chain >= 10:
+                print(f"  {DIM}Chain bonus: +{chain_bonus}% shiny rate{RESET}")
             print()
             coption = crazy_input("Battle/catch this pokémon? (yes or no)")
             print()
@@ -915,9 +1020,15 @@ try:
                                 explode_print(f"You defeated {wild}!")
                                 xp_gain = calculate_xp_gain(max(0, original_enemyhp), pokemon[poke_choice]["dm"], hit, enemydm)
                                 if is_shiny: xp_gain = int(xp_gain * 2)
+                                # Daily species bonus
+                                daily_xp_mult = check_daily_species_catch(wild, daily_challenge['daily_species'])
+                                if daily_xp_mult > 1.0:
+                                    xp_gain = int(xp_gain * daily_xp_mult)
+                                    print(f"  {BOLD}{BRIGHT_MAGENTA}🎯 Daily species bonus! {daily_xp_mult}x XP!{RESET}")
                                 pokemon[poke_choice]["xp"] += xp_gain
                                 print(f"  {BOLD}{BRIGHT_CYAN}⭐ +{xp_gain} XP!{RESET}")
                                 trophies += 150 if is_shiny else 100
+                                daily_species_caught.add(wild.lower())
                                 if pokemon[poke_choice]["xp"] >= pokemon[poke_choice]["maxxp"]:
                                     poke_choice = level_up_pokemon(pokemon, poke_choice)
                                 break
@@ -1769,7 +1880,7 @@ try:
                 crazy_input("Press Enter to continue")
             elif cloud_opt == "3" and cloud_token:
                 try:
-                    save_data = json.dumps({"name": name, "pokemon": pokemon, "money": money, "trophies": trophies, "inventory": inventory, "location": location, "badges": badges, "tower_record": tower_record, "pokedex_seen": list(pokedex_seen), "pokedex_caught": list(pokedex_caught), "elite_four_defeated": elite_four_defeated, "achievements": achievement_manager.to_dict(), "heal_tickets": heal_tickets, "daycare": daycare, "pvp_rp": pvp_rp})
+                    save_data = json.dumps({"name": name, "pokemon": pokemon, "money": money, "trophies": trophies, "inventory": inventory, "location": location, "badges": badges, "tower_record": tower_record, "pokedex_seen": list(pokedex_seen), "pokedex_caught": list(pokedex_caught), "elite_four_defeated": elite_four_defeated, "achievements": achievement_manager.to_dict(), "heal_tickets": heal_tickets, "daycare": daycare, "pvp_rp": pvp_rp, "shiny_chain": shiny_chain, "last_encounter_species": last_encounter_species, "login_streak": login_streak, "last_login_date": last_login_date, "daily_raid_completed": daily_raid_completed, "daily_species_caught": list(daily_species_caught), "frontier_progress": frontier_progress})
                     r = robust_request("POST", f"{SERVER_URL}/save", json_data={"save_data": save_data}, headers={"Authorization": f"Bearer {cloud_token}"}, timeout=5)
                     if r.status_code == 200:
                         print(f"  {BRIGHT_GREEN}✅ {r.json().get('message', 'Save pushed to cloud!')}{RESET}")
@@ -3249,6 +3360,338 @@ try:
                 fancy_header("AI CHATBOT", emoji="🤖", width=50)
                 print(f"  {BRIGHT_RED}❌ Chatbot error: {e}{RESET}")
             crazy_input("Press Enter to continue")
+
+        # ══════════════════════════════════════
+        # OPTION 23: DAILY CHALLENGES
+        # ══════════════════════════════════════
+        if option == 23:
+            clear_screen()
+            fancy_header("DAILY CHALLENGES", emoji="📅", width=50)
+            print(f"  {DIM}Date: {daily_challenge['date']}{RESET}")
+            print()
+            print(f"  {BOLD}{BRIGHT_YELLOW}🎯 Daily Species (2x XP):{RESET}")
+            for i, sp in enumerate(daily_challenge['daily_species'], 1):
+                caught_tag = " ✅" if sp.lower() in [p.lower() for p in daily_species_caught] else ""
+                print(f"    {i}. {sp}{caught_tag}")
+            print()
+            print(f"  {BOLD}{BRIGHT_MAGENTA}💰 Bonus Type (1.5x Coins): {daily_challenge['daily_bonus_type']}{RESET}")
+            print()
+            print(f"  {BOLD}{BRIGHT_RED}👑 Daily Raid Boss:{RESET}")
+            rb = daily_challenge['daily_raid']
+            raid_status = "✅ COMPLETED" if daily_raid_completed else "⬜ AVAILABLE"
+            print(f"    {rb['name']} (Lvl {rb['level']}) {rb['type']} — {raid_status}")
+            if not daily_raid_completed:
+                print(f"    {DIM}Rewards: {rb['reward']['coins']} coins, {rb['reward']['trophies']} trophies, {rb['reward']['item']}{RESET}")
+            print()
+            print(f"  {BOLD}{BRIGHT_WHITE}1.{RESET} Challenge Daily Raid Boss")
+            print(f"  {BOLD}{DIM}Q.{RESET} Back")
+            print()
+            daily_opt = crazy_input("Choose").strip()
+            if daily_opt == "1" and not daily_raid_completed:
+                if not pokemon:
+                    print(f"\n  {BOLD}{BRIGHT_RED}❌ You need Pokemon first!{RESET}")
+                    time.sleep(1)
+                else:
+                    clear_screen()
+                    rb = daily_challenge['daily_raid']
+                    fancy_header(f"RAID: {rb['name'].upper()}", emoji="👑", width=50)
+                    print(f"  {BOLD}{BRIGHT_RED}Level: {rb['level']} | Type: {rb['type']}{RESET}")
+                    print(f"  {BOLD}{BRIGHT_YELLOW}HP Multiplier: {rb['hp_mult']}x | DM Multiplier: {rb['dm_mult']}x{RESET}")
+                    print()
+                    print(f"  {BOLD}{BRIGHT_GREEN}Your team:{RESET}")
+                    for pn, st in pokemon.items():
+                        hp_pct = int((st['hp'] / st['maxhp']) * 100) if st['maxhp'] > 0 else 0
+                        bar_color = BRIGHT_GREEN if hp_pct > 60 else (BRIGHT_YELLOW if hp_pct > 30 else BRIGHT_RED)
+                        bar = f"{bar_color}{'█' * (hp_pct // 5)}{DIM}{'░' * (20 - hp_pct // 5)}{RESET}"
+                        print(f"    {pn} {bar} {st['hp']}/{st['maxhp']}")
+                    print()
+                    ans = crazy_input("Start raid? (y/n)").strip().lower()
+                    if ans == 'y':
+                        # Create raid boss stats
+                        from game_functions import make_pokemon
+                        boss_hp = int(rb['hp_mult'] * 50)
+                        boss_dm = int(rb['dm_mult'] * 30)
+                        boss = make_pokemon(boss_hp, boss_dm, rb['type'], ['Hyper Beam', 'Dragon Pulse', 'Earthquake', 'Psychic'], speed=80, lvl=rb['level'], name=rb['name'])
+                        boss['maxhp'] = boss_hp
+                        
+                        # Run raid battle
+                        clear_screen()
+                        fancy_header(f"VS {rb['name'].upper()}", emoji="⚔️", width=50)
+                        print(f"  {BOLD}{BRIGHT_RED}{rb['name']} (Lvl {rb['level']}) — HP: {boss['hp']}/{boss['maxhp']} | DM: {boss['dm']}{RESET}")
+                        print()
+                        
+                        raid_won = True
+                        while boss['hp'] > 0:
+                            # Player turn
+                            print(f"  {BOLD}{BRIGHT_CYAN}Your turn! Choose a Pokemon:{RESET}")
+                            for i, (pn, st) in enumerate(pokemon.items(), 1):
+                                print(f"    {i}. {pn} HP: {st['hp']}/{st['maxhp']}")
+                            poke_idx = crazy_input("Pokemon #").strip()
+                            try:
+                                poke_idx = int(poke_idx)
+                                poke_keys = list(pokemon.keys())
+                                if 1 <= poke_idx <= len(poke_keys):
+                                    poke_key = poke_keys[poke_idx - 1]
+                                    player = pokemon[poke_key]
+                                    if player['hp'] <= 0:
+                                        print(f"  {BRIGHT_RED}{poke_key} is fainted!{RESET}")
+                                        time.sleep(1)
+                                        continue
+                                    
+                                    print(f"  {BOLD}{BRIGHT_CYAN}Choose a move:{RESET}")
+                                    for i, m in enumerate(player['moves'], 1):
+                                        print(f"    {i}. {m}")
+                                    move_idx = crazy_input("Move #").strip()
+                                    try:
+                                        move_idx = int(move_idx)
+                                        if 1 <= move_idx <= len(player['moves']):
+                                            move_name = player['moves'][move_idx - 1]
+                                            from game_functions import calculate_move_damage
+                                            dmg, eff = calculate_move_damage(move_name, player, boss['type'])
+                                            boss['hp'] = max(0, boss['hp'] - dmg)
+                                            eff_msg = ""
+                                            if eff > 1.0: eff_msg = f" {BRIGHT_GREEN}Super effective!{RESET}"
+                                            elif eff < 1.0 and eff > 0: eff_msg = f" {BRIGHT_RED}Not very effective...{RESET}"
+                                            elif eff == 0: eff_msg = f" {DIM}No effect!{RESET}"
+                                            print(f"  {BRIGHT_YELLOW}{poke_key} used {move_name}! {dmg} damage!{eff_msg}{RESET}")
+                                            print(f"  {BRIGHT_RED}{rb['name']} HP: {boss['hp']}/{boss['maxhp']}{RESET}")
+                                            print()
+                                    except:
+                                        pass
+                                else:
+                                    print(f"  {BRIGHT_RED}Invalid selection!{RESET}")
+                                    time.sleep(1)
+                                    continue
+                            except:
+                                pass
+                            
+                            if boss['hp'] <= 0:
+                                break
+                            
+                            # Boss turn
+                            boss_dmg = max(1, boss['dm'] // 3)
+                            player['hp'] = max(0, player['hp'] - boss_dmg)
+                            print(f"  {BRIGHT_RED}{rb['name']} attacks! {boss_dmg} damage to {poke_key}!{RESET}")
+                            print(f"  {BRIGHT_YELLOW}{poke_key} HP: {player['hp']}/{player['maxhp']}{RESET}")
+                            print()
+                            
+                            if player['hp'] <= 0:
+                                print(f"  {BRIGHT_RED}{poke_key} fainted!{RESET}")
+                                # Check if any pokemon left
+                                alive = sum(1 for p in pokemon.values() if p['hp'] > 0)
+                                if alive == 0:
+                                    raid_won = False
+                                    print(f"  {BRIGHT_RED}All Pokemon fainted! Raid failed!{RESET}")
+                                    break
+                        
+                        if raid_won:
+                            daily_raid_completed = True
+                            money += rb['reward']['coins']
+                            trophies += rb['reward']['trophies']
+                            inventory[rb['reward']['item']] = inventory.get(rb['reward']['item'], 0) + 1
+                            print(f"\n  {BOLD}{BRIGHT_GREEN}🎉 RAID COMPLETE!{RESET}")
+                            print(f"  {BOLD}{BRIGHT_GREEN}+{rb['reward']['coins']} coins{RESET}")
+                            print(f"  {BOLD}{BRIGHT_GREEN}+{rb['reward']['trophies']} trophies{RESET}")
+                            print(f"  {BOLD}{BRIGHT_MAGENTA}+ {rb['reward']['item']}{RESET}")
+                        else:
+                            print(f"\n  {BOLD}{BRIGHT_RED}💀 Raid failed! Heal your team and try again.{RESET}")
+                        crazy_input("Press Enter to continue")
+            elif daily_opt == "1" and daily_raid_completed:
+                print(f"\n  {BOLD}{BRIGHT_YELLOW}Daily raid already completed! Come back tomorrow.{RESET}")
+                crazy_input("Press Enter to continue")
+
+        # ══════════════════════════════════════
+        # OPTION 24: BATTLE FRONTIER
+        # ══════════════════════════════════════
+        if option == 24:
+            clear_screen()
+            fancy_header("BATTLE FRONTIER", emoji="🎪", width=50)
+            print(f"  {DIM}Post-game facilities. Earn Frontier Symbols!{RESET}")
+            symbols = count_frontier_symbols({"frontier_progress": frontier_progress})
+            print(f"  {BOLD}{BRIGHT_YELLOW}Frontier Symbols: {symbols}/7{RESET}")
+            print()
+            for i, (key, fac) in enumerate(BATTLE_FRONTIER.items(), 1):
+                prog = get_frontier_progress({"frontier_progress": frontier_progress}, key)
+                status = "✅" if prog.get("completed") else f"Best: {prog.get('best_streak', 0)}"
+                print(f"  {BOLD}{BRIGHT_WHITE}{i}.{RESET} {fac['emoji']} {fac['name']} {DIM}[{status}]{RESET}")
+            print()
+            print(f"  {BOLD}{DIM}Q.{RESET} Back")
+            bf_opt = crazy_input("Choose").strip()
+            bf_keys = list(BATTLE_FRONTIER.keys())
+            if bf_opt.isdigit() and 1 <= int(bf_opt) <= len(bf_keys):
+                selected_fac = bf_keys[int(bf_opt) - 1]
+                fac = BATTLE_FRONTIER[selected_fac]
+                clear_screen()
+                fancy_header(fac['name'], emoji=fac['emoji'], width=50)
+                print(f"  {BOLD}{BRIGHT_CYAN}{fac['description']}{RESET}")
+                print(f"  {DIM}Rules: {fac['rules']}{RESET}")
+                print(f"  {BOLD}{BRIGHT_MAGENTA}Reward: {fac['symbol']}{RESET}")
+                print()
+                print(f"  {BOLD}{BRIGHT_WHITE}1.{RESET} Start Challenge")
+                print(f"  {BOLD}{DIM}Q.{RESET} Back")
+                bf_start = crazy_input("Choose").strip()
+                if bf_start == "1":
+                    if not pokemon:
+                        print(f"\n  {BOLD}{BRIGHT_RED}❌ You need Pokemon first!{RESET}")
+                        time.sleep(1)
+                    else:
+                        # Run the selected facility
+                        if selected_fac == "factory":
+                            # Battle Factory - rental Pokemon
+                            clear_screen()
+                            fancy_header("BATTLE FACTORY", emoji="🏭", width=50)
+                            print(f"  {DIM}You receive 3 random rental Pokemon!{RESET}")
+                            print()
+                            rental_team = get_rental_team(3)
+                            for i, rp in enumerate(rental_team, 1):
+                                print(f"  {BOLD}{BRIGHT_WHITE}{i}.{RESET} {rp['name']} {DIM}[{rp['type'][0]}]{RESET} HP:{rp['hp']} DM:{rp['dm']} SPD:{rp['speed']}")
+                                print(f"     {DIM}Moves: {', '.join(rp['moves'][:3])}...{RESET}")
+                            print()
+                            print(f"  {BOLD}{BRIGHT_YELLOW}Win 7 battles to earn the Knowledge Symbol!{RESET}")
+                            print()
+                            ans = crazy_input("Accept rental team? (y/n)").strip().lower()
+                            if ans == 'y':
+                                # Simulate factory battles
+                                wins = 0
+                                for round_num in range(1, 8):
+                                    clear_screen()
+                                    fancy_header(f"FACTORY ROUND {round_num}/7", emoji="🏭", width=50)
+                                    opponent = random.choice(RENTAL_POKEMON)
+                                    print(f"  {BOLD}{BRIGHT_RED}Opponent: {opponent['name']} ({opponent['type'][0]}){RESET}")
+                                    print(f"  {DIM}HP: {opponent['hp']} | DM: {opponent['dm']} | SPD: {opponent['speed']}{RESET}")
+                                    print()
+                                    # Simple battle simulation
+                                    player_power = sum(r['dm'] for r in rental_team)
+                                    enemy_power = opponent['dm']
+                                    if player_power > enemy_power * 0.8:
+                                        wins += 1
+                                        print(f"  {BRIGHT_GREEN}✅ Round {round_num} won!{RESET}")
+                                    else:
+                                        print(f"  {BRIGHT_RED}❌ Round {round_num} lost!{RESET}")
+                                        break
+                                    time.sleep(0.5)
+                                    crazy_input("Press Enter")
+                                
+                                if wins >= 7:
+                                    money += 5000
+                                    trophies += 3000
+                                    inventory["Choice Band"] = inventory.get("Choice Band", 0) + 1
+                                    frontier_progress = update_frontier_progress({"frontier_progress": frontier_progress}, "factory", streak=7, completed=True, symbol="Knowledge Symbol")
+                                    print(f"\n  {BOLD}{BRIGHT_GREEN}🎉 FACTORY COMPLETE! Knowledge Symbol earned!{RESET}")
+                                    print(f"  {BOLD}{BRIGHT_GREEN}+5000 coins, +3000 trophies, +Choice Band{RESET}")
+                                else:
+                                    frontier_progress = update_frontier_progress({"frontier_progress": frontier_progress}, "factory", streak=wins)
+                                    print(f"\n  {BOLD}{BRIGHT_RED}💀 Factory run ended at {wins}/7 wins.{RESET}")
+                                crazy_input("Press Enter to continue")
+                        
+                        elif selected_fac == "hall":
+                            # Battle Hall - face all 18 types
+                            clear_screen()
+                            fancy_header("BATTLE HALL", emoji="🏰", width=50)
+                            print(f"  {DIM}Face all 18 types in succession!{RESET}")
+                            print()
+                            hall_order = get_battle_hall_order()
+                            print(f"  {BOLD}{BRIGHT_YELLOW}Type order:{RESET}")
+                            for i, t in enumerate(hall_order, 1):
+                                opp = BATTLE_HALL_OPPONENTS[t]
+                                print(f"  {i:2}. {t:8} - {opp['name']} (HP:{opp['hp']} DM:{opp['dm']})")
+                            print()
+                            ans = crazy_input("Start Battle Hall? (y/n)").strip().lower()
+                            if ans == 'y':
+                                # Clone team for hall (no healing between battles)
+                                hall_team = {}
+                                for k, v in pokemon.items():
+                                    hall_team[k] = dict(v)
+                                
+                                wins = 0
+                                for i, ptype in enumerate(hall_order):
+                                    opp = BATTLE_HALL_OPPONENTS[ptype]
+                                    clear_screen()
+                                    fancy_header(f"HALL BATTLE {i+1}/18: {ptype.upper()}", emoji="⚔️", width=50)
+                                    print(f"  {BOLD}{BRIGHT_RED}Opponent: {opp['name']} ({ptype}){RESET}")
+                                    print(f"  {DIM}HP: {opp['hp']} | DM: {opp['dm']} | SPD: {opp['speed']}{RESET}")
+                                    print()
+                                    # Show team status
+                                    alive = {k: v for k, v in hall_team.items() if v['hp'] > 0}
+                                    if not alive:
+                                        print(f"  {BRIGHT_RED}All Pokemon fainted!{RESET}")
+                                        break
+                                    print(f"  {BOLD}{BRIGHT_GREEN}Your team:{RESET}")
+                                    for k, v in alive.items():
+                                        print(f"    {k} HP: {v['hp']}/{v['maxhp']}")
+                                    print()
+                                    # Simple simulation
+                                    team_power = sum(v['dm'] for v in alive.values())
+                                    if team_power > opp['dm'] * 0.7:
+                                        wins += 1
+                                        # Take some damage
+                                        for k in list(alive.keys())[:1]:
+                                            dmg = max(1, opp['dm'] // 4)
+                                            hall_team[k]['hp'] = max(0, hall_team[k]['hp'] - dmg)
+                                        print(f"  {BRIGHT_GREEN}✅ {ptype} type defeated!{RESET}")
+                                    else:
+                                        # Lose a pokemon
+                                        if alive:
+                                            loser = random.choice(list(alive.keys()))
+                                            hall_team[loser]['hp'] = 0
+                                            print(f"  {BRIGHT_RED}❌ {loser} fainted!{RESET}")
+                                        # Check if still have pokemon
+                                        alive_check = {k: v for k, v in hall_team.items() if v['hp'] > 0}
+                                        if not alive_check:
+                                            print(f"  {BRIGHT_RED}All Pokemon fainted!{RESET}")
+                                            break
+                                        wins += 0.5  # Partial win
+                                    time.sleep(0.5)
+                                    crazy_input("Press Enter")
+                                
+                                final_wins = int(wins)
+                                if final_wins >= 18:
+                                    money += 30000
+                                    trophies += 15000
+                                    inventory["Expert Belt"] = inventory.get("Expert Belt", 0) + 1
+                                    frontier_progress = update_frontier_progress({"frontier_progress": frontier_progress}, "hall", streak=18, completed=True, symbol="Print Symbol")
+                                    print(f"\n  {BOLD}{BRIGHT_GREEN}🎉 HALL COMPLETE! Print Symbol earned!{RESET}")
+                                    print(f"  {BOLD}{BRIGHT_GREEN}+30000 coins, +15000 trophies, +Expert Belt{RESET}")
+                                else:
+                                    frontier_progress = update_frontier_progress({"frontier_progress": frontier_progress}, "hall", streak=final_wins)
+                                    print(f"\n  {BOLD}{BRIGHT_RED}💀 Hall run ended at {final_wins}/18 types.{RESET}")
+                                crazy_input("Press Enter to continue")
+                        
+                        else:
+                            # Generic facility handler for other facilities
+                            clear_screen()
+                            fancy_header(fac['name'], emoji=fac['emoji'], width=50)
+                            print(f"  {DIM}Challenge in progress...{RESET}")
+                            print()
+                            # Simple simulation for other facilities
+                            rounds = fac.get('rounds', fac.get('rooms', fac.get('max_streak', 7)))
+                            wins = 0
+                            for r in range(1, rounds + 1):
+                                print(f"  {BOLD}{BRIGHT_WHITE}Round {r}/{rounds}...{RESET}")
+                                if random.random() < 0.7:  # 70% win rate
+                                    wins += 1
+                                    print(f"  {BRIGHT_GREEN}✅ Won!{RESET}")
+                                else:
+                                    print(f"  {BRIGHT_RED}❌ Lost!{RESET}")
+                                    break
+                                time.sleep(0.3)
+                            
+                            if wins >= rounds:
+                                reward_key = "complete"
+                                reward = fac['rewards'].get(reward_key, {"coins": 5000, "trophies": 3000, "item": "Rare Candy"})
+                                money += reward['coins']
+                                trophies += reward['trophies']
+                                if reward.get('item'):
+                                    inventory[reward['item']] = inventory.get(reward['item'], 0) + 1
+                                frontier_progress = update_frontier_progress({"frontier_progress": frontier_progress}, selected_fac, streak=wins, completed=True, symbol=fac['symbol'])
+                                print(f"\n  {BOLD}{BRIGHT_GREEN}🎉 {fac['name']} COMPLETE! {fac['symbol']} earned!{RESET}")
+                                print(f"  {BOLD}{BRIGHT_GREEN}+{reward['coins']} coins, +{reward['trophies']} trophies{RESET}")
+                                if reward.get('item'):
+                                    print(f"  {BOLD}{BRIGHT_MAGENTA}+ {reward['item']}{RESET}")
+                            else:
+                                frontier_progress = update_frontier_progress({"frontier_progress": frontier_progress}, selected_fac, streak=wins)
+                                print(f"\n  {BOLD}{BRIGHT_RED}💀 Run ended at {wins}/{rounds}.{RESET}")
+                            crazy_input("Press Enter to continue")
 
         # ══════════════════════════════════════
         # OPTION 22: SAVE & LEAVE
