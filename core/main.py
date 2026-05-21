@@ -98,7 +98,7 @@ pokedex_caught = set()
 elite_four_defeated = []
 cloud_token = None
 cloud_username = None
-SERVER_URL = "http://localhost:5001/api"
+SERVER_URL = "https://pokemon-game-jbjg.onrender.com/api"
 
 # Shiny hunting system
 shiny_chain = 0
