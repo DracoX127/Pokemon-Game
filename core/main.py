@@ -73,7 +73,7 @@ from time_system import (HOUR, get_period, get_time_name, advance_time,
 from game_functions import (
     apply_entry_abilities, apply_item_turn_trigger, apply_hp_threshold_items,
     apply_status_items, apply_ko_ability, apply_contact_abilities,
-    apply_item_after_attack
+    apply_item_after_attack, format_type
 )
 pokemon = {}
 money = 500
@@ -751,7 +751,7 @@ try:
 
             print()
             shiny_tag = f" {BRIGHT_YELLOW}✨SHINY✨{RESET}" if is_shiny else ""
-            electric_box(f"{wild.upper()}{shiny_tag} — HP: {enemyhp} | DM: {enemydm} | Type: {enemytype}", width=50)
+            electric_box(f"{wild.upper()}{shiny_tag} — HP: {enemyhp} | DM: {enemydm} | Type: {format_type(enemytype)}", width=50)
             if battle_weather != "Clear":
                 print(f"  {BOLD}{BRIGHT_CYAN}🌤️  Weather: {battle_weather}{RESET}")
             print()
@@ -1856,7 +1856,7 @@ try:
             print()
             print(f"  {BOLD}{BRIGHT_RED}Leader's team:{RESET}")
             for pn, st in gl_data["team"].items():
-                print(f"    {pn}  Lvl {st.get('lvl','?')}  {st.get('type','?')}  HP:{st.get('hp','?')} DM:{st.get('dm','?')}")
+                print(f"    {pn}  Lvl {st.get('lvl','?')}  {format_type(st.get('type','?'))}  HP:{st.get('hp','?')} DM:{st.get('dm','?')}")
             print()
             print(f"  {BOLD}{BRIGHT_GREEN}Your team:{RESET}")
             for pn, st in pokemon.items():
@@ -2109,7 +2109,7 @@ try:
                 hp_pct = int((st['hp'] / st['maxhp']) * 100) if st['maxhp'] > 0 else 0
                 bar_color = BRIGHT_GREEN if hp_pct > 60 else (BRIGHT_YELLOW if hp_pct > 30 else BRIGHT_RED)
                 bar = f"{bar_color}{'█' * (hp_pct // 5)}{DIM}{'░' * (20 - hp_pct // 5)}{RESET}"
-                print(f"  {BOLD}{i}.{RESET} {pn}{gen_tag}{shiny_tag}  {bar} {st['hp']}/{st['maxhp']}  {st.get('type','?')}  DM:{st['dm']}")
+                print(f"  {BOLD}{i}.{RESET} {pn}{gen_tag}{shiny_tag}  {bar} {st['hp']}/{st['maxhp']}  {format_type(st.get('type','?'))}  DM:{st['dm']}")
             print()
             print(f"  {BOLD}{BRIGHT_CYAN}Your Team:{RESET} {rainbow_text(', '.join(pokemon.keys()))}")
             p1 = crazy_input("First Pokemon")
@@ -2418,7 +2418,7 @@ try:
                         print(f"\n  {BOLD}{BRIGHT_GREEN}Found {len(results)} results:{RESET}")
                         for name, data in results[:20]:
                             caught = "✅" if name in pokedex_caught else ("👁️" if name in pokedex_seen else "❓")
-                            print(f"  {caught} {BOLD}{name.capitalize():15}{RESET} {data.get('type','?'):8} HP:{data.get('hp','?'):3} DM:{data.get('dm','?'):3}")
+                            print(f"  {caught} {BOLD}{name.capitalize():15}{RESET} {format_type(data.get('type','?')):12} HP:{data.get('hp','?'):3} DM:{data.get('dm','?'):3}")
                         if len(results) > 20:
                             print(f"  {DIM}...and {len(results) - 20} more{RESET}")
                     else:

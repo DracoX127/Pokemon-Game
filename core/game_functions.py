@@ -657,6 +657,13 @@ def train_pokemon(pokemon_dict, poke_name, money, stat_type):
     return money
 
 
+def format_type(pokemon_type):
+    """Format type for display - handles both string and list types."""
+    if isinstance(pokemon_type, list):
+        return " / ".join(pokemon_type)
+    return pokemon_type
+
+
 def display_pokemon_stats(pokemon_dict, player_name, money, trophies):
     """Display all player pokemon stats — MODERN VERSION."""
     clear_screen()
@@ -684,7 +691,7 @@ def display_pokemon_stats(pokemon_dict, player_name, money, trophies):
             xp_bar = f"{BRIGHT_CYAN}{'█' * (xp_pct // 2)}{DIM}{'░' * (50 - xp_pct // 2)}{RESET}"
             
             print(f"  {BOLD}{BRIGHT_WHITE}┌─ {poke_name.upper()}{shiny_tag}{gen_tag}{status_tag}{RESET}")
-            print(f"  {BOLD}{BRIGHT_WHITE}│{RESET} {BRIGHT_WHITE}Level: {stats['lvl']}  |  Type: {stats.get('type', '?')}  |  Speed: {stats.get('speed', 50)}{RESET}")
+            print(f"  {BOLD}{BRIGHT_WHITE}│{RESET} {BRIGHT_WHITE}Level: {stats['lvl']}  |  Type: {format_type(stats.get('type', '?'))}  |  Speed: {stats.get('speed', 50)}{RESET}")
             print(f"  {BOLD}{BRIGHT_WHITE}│{RESET} HP:    {hp_bar} {stats['hp']}/{stats['maxhp']}")
             print(f"  {BOLD}{BRIGHT_WHITE}│{RESET} XP:    {xp_bar} {stats['xp']}/{stats['maxxp']}")
             print(f"  {BOLD}{BRIGHT_WHITE}│{RESET} DM: {stats['dm']}  |  Stages: DM+{stats.get('stages',{}).get('dm',0)} SPD+{stats.get('stages',{}).get('speed',0)}")

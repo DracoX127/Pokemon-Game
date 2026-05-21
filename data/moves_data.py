@@ -7805,7 +7805,12 @@ MOVES = {
 
 
 def get_effectiveness(atk_type, def_type):
-    """Return type effectiveness multiplier."""
+    """Return type effectiveness multiplier. Handles dual types (list or single string)."""
+    if isinstance(def_type, list):
+        multiplier = 1.0
+        for dt in def_type:
+            multiplier *= TYPE_CHART.get(atk_type, {}).get(dt, 1.0)
+        return multiplier
     return TYPE_CHART.get(atk_type, {}).get(def_type, 1.0)
 
 
