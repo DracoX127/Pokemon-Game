@@ -788,7 +788,7 @@ def test_phase10_server():
         
         # 10.2 Test endpoints exist (they have /api/ prefix)
         rules = [rule.rule for rule in app.url_map.iter_rules()]
-        expected_endpoints = ['/api/register', '/api/login', '/api/save', '/api/load', '/api/accounts', '/api/me']
+        expected_endpoints = ['/api/register', '/api/login', '/api/save', '/api/load', '/api/save-info', '/api/accounts', '/api/me']
         
         missing = [ep for ep in expected_endpoints if ep not in rules]
         if missing:
@@ -797,6 +797,98 @@ def test_phase10_server():
             results.pass_test(f"server endpoints: all {len(expected_endpoints)} expected endpoints exist")
     except Exception as e:
         results.fail_test("server endpoints", str(e))
+
+# ═══════════════════════════════════════════
+# PHASE 11: 2.0 UPDATE SYSTEMS
+# ═══════════════════════════════════════════
+def test_phase11_update_systems():
+    results.start_phase("2.0 Update Systems")
+
+    try:
+        import py_compile
+        py_compile.compile(os.path.join(BASE_DIR, "core", "main.py"), doraise=True)
+        py_compile.compile(os.path.join(BASE_DIR, "core", "game_functions.py"), doraise=True)
+        py_compile.compile(os.path.join(BASE_DIR, "core", "update_systems.py"), doraise=True)
+        results.pass_test("core compile: main/game_functions/update_systems compile cleanly")
+    except Exception as e:
+        results.fail_test("core compile", str(e))
+
+    try:
+        from game_functions import make_pokemon, calculate_move_damage
+        mon = make_pokemon(80, 50, "Electric", ["Thunder Shock"], speed=90, name="Pikachu")
+        assert "personality" in mon
+        assert "bond" in mon and "title" in mon["bond"]
+        assert "fusion_stability" in mon
+        dmg, eff = calculate_move_damage("Thunder Shock", mon, "Water")
+        assert dmg > 0 and eff >= 1
+        results.pass_test("pokemon profiles: personality, bond, and damage hooks work")
+    except Exception as e:
+        results.fail_test("pokemon profiles", str(e))
+
+    try:
+        from update_systems import calculate_catch_grade, catch_grade_rewards, apply_reward_bundle
+        inventory = {}
+        grade = calculate_catch_grade({
+            "hp_ratio": 0.05,
+            "catch_probability": 100,
+            "attempts": 1,
+            "status": "Sleep",
+            "shiny": True,
+            "throw_rating": "PERFECT",
+        })
+        assert grade["grade"] in ("S", "SS")
+        reward = catch_grade_rewards(grade, "Electric", shiny=True)
+        coins = apply_reward_bundle(inventory, reward)
+        assert coins > 0 and inventory
+        results.pass_test(f"catch grading: {grade['grade']} rewards produce coins/materials")
+    except Exception as e:
+        results.fail_test("catch grading", str(e))
+
+    try:
+        from update_systems import generate_item_drops, apply_item_drops, craft_tm, TM_RECIPES
+        inventory = {"Spark Shard": 3, "TM Shard": 2, "Battle Scrap": 1}
+        drops = generate_item_drops("pikachu", "Electric", level=25, grade="S", victory=True)
+        apply_item_drops(inventory, drops)
+        ok, coins, msg = craft_tm(inventory, "Thunderbolt", coins=1000)
+        assert ok, msg
+        assert inventory.get(TM_RECIPES["Thunderbolt"]["item"], 0) == 1
+        assert coins < 1000
+        results.pass_test("item drops + TM crafting: materials and crafted TM work")
+    except Exception as e:
+        results.fail_test("item drops + TM crafting", str(e))
+
+    try:
+        from game_functions import make_pokemon
+        from update_systems import create_default_base, preview_fusion, roll_fusion_result
+        p1 = make_pokemon(60, 40, "Fire", ["Ember"], speed=65, name="Charmander")
+        p2 = make_pokemon(70, 35, "Water", ["Water Gun"], speed=55, name="Squirtle")
+        preview = preview_fusion("charmander", p1, "squirtle", p2, {}, create_default_base())
+        rolled = roll_fusion_result(preview)
+        assert rolled["hp"] > 0 and rolled["dm"] > 0 and rolled["speed"] > 0
+        assert rolled["stability"] in ("Perfect", "Stable", "Volatile", "Chaotic", "Fractured")
+        results.pass_test(f"fusion 2.0: preview and roll produce {rolled['stability']} fusion")
+    except Exception as e:
+        results.fail_test("fusion 2.0", str(e))
+
+    try:
+        from update_systems import NotificationCenter, create_default_reputation, get_what_now_recommendations, professor_advice
+        state = {
+            "pokemon": {"pikachu": {"hp": 5, "maxhp": 60, "lvl": 5}},
+            "inventory": {"TM Shard": 2},
+            "badges": [],
+            "daycare": {"egg_waiting": True},
+            "daily_challenge": {"daily_species": ["Pikachu"]},
+            "pokedex_caught": ["pikachu"],
+            "reputation": create_default_reputation(),
+        }
+        center = NotificationCenter(poll_interval=5)
+        generated = center.poll(state, force=True)
+        recs = get_what_now_recommendations(state)
+        advice = professor_advice(state)
+        assert generated and recs and advice
+        results.pass_test("notifications/professor/what-now: produce actionable guidance")
+    except Exception as e:
+        results.fail_test("notifications/professor/what-now", str(e))
 
 # ═══════════════════════════════════════════
 # MAIN TEST RUNNER
@@ -816,6 +908,7 @@ def run_all_tests():
     test_phase8_abilities()
     test_phase9_moves()
     test_phase10_server()
+    test_phase11_update_systems()
     
     success = results.summary()
     

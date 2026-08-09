@@ -478,7 +478,10 @@ def print_art(art, style_func=rainbow_text):
 
 def crazy_input(prompt):
     """A crazy styled input prompt."""
-    styled = f"{BOLD}{BRIGHT_CYAN}▸ {rainbow_text(prompt)}{BRIGHT_CYAN} ➤ {RESET}"
+    styled = (
+        f"\n  {BOLD}{BRIGHT_CYAN}┏━ {rainbow_text(prompt)} {BRIGHT_CYAN}━┓{RESET}\n"
+        f"  {BOLD}{BRIGHT_GREEN}➤{RESET} "
+    )
     return input(styled)
 
 def crazy_int_input(prompt):
@@ -1064,16 +1067,29 @@ def theme_box(text, width=None):
 def theme_divider(width=50):
     """Draw a divider using the currently selected border style."""
     style = GAME_SETTINGS.get("border_style")
-    if style == "crazy": return crazy_divider(width)
-    if style == "fire": print(fire_text("🔥" + "━" * (width - 2) + "🔥")); return
-    if style == "electric": print(f"{BRIGHT_YELLOW}{'⚡' * (width // 2)}{RESET}"); return
-    if style == "shadow": return dot_divider(width)
-    if style == "double": return rainbow_divider(width)
-    if style == "rounded": return wave_divider(width)
-    if style == "dashed": return zigzag_divider(width)
-    if style == "water": return wave_divider(width)
-    if style == "grass": return emoji_divider(width, theme="nature")
-    return crazy_divider(width)
+    if style == "crazy":
+        return crazy_divider(width)
+    if style == "fire":
+        print(fire_text("🔥" + "━" * (width - 2) + "🔥"))
+        return
+    if style == "electric":
+        print(f"{BRIGHT_YELLOW}{'⚡' * (width // 2)}{RESET}")
+        return
+    if style == "shadow":
+        return dot_divider(width)
+    if style == "double":
+        return rainbow_divider(width)
+    if style == "rounded":
+        return wave_divider(width)
+    if style == "dashed":
+        return zigzag_divider(width)
+    if style == "water":
+        return wave_divider(width)
+    if style == "grass":
+        return emoji_divider(width, theme="nature")
+    if style == "cyberpunk":
+        return arrow_divider(width, direction="right")
+    return emoji_divider(width, theme="pokemon")
 
 def theme_print(text, delay=None):
     """Print text using the selected reveal animation."""
@@ -1104,9 +1120,12 @@ def theme_print(text, delay=None):
 # Dynamic layout multi-pane panel renderer
 def render_panel_grid(panels, width=80):
     """Render multiple text panels side-by-side inside styled boxes."""
-    if not panels: return
+    if not panels:
+        return
+
     num_panels = len(panels)
-    col_width = (width - (num_panels * 2)) // num_panels
+    available = max(width - (num_panels + 1) * 4, 22 * num_panels)
+    col_width = max(20, available // num_panels)
     
     lines_per_panel = []
     max_lines = 0
@@ -1116,19 +1135,19 @@ def render_panel_grid(panels, width=80):
         max_lines = max(max_lines, len(p_lines))
         
     border_color = get_theme_color()
-    top_border = f"  {border_color}" + " ┌" + "─"*col_width + "┐ " * num_panels + RESET
+    top_border = f"  {border_color}┌" + "┬".join(["─" * (col_width + 2)] * num_panels) + f"┐{RESET}"
     print(top_border)
     
     for r in range(max_lines):
-        row_str = "  "
+        row_str = f"  {border_color}│{RESET}"
         for p_idx in range(num_panels):
             p_lines = lines_per_panel[p_idx]
             cell_content = p_lines[r] if r < len(p_lines) else ""
             display_text = cell_content[:col_width].ljust(col_width)
-            row_str += f"{border_color}│{RESET} {display_text} {border_color}│{RESET} "
+            row_str += f" {display_text} {border_color}│{RESET}"
         print(row_str)
         
-    bot_border = f"  {border_color}" + " └" + "─"*col_width + "┘ " * num_panels + RESET
+    bot_border = f"  {border_color}└" + "┴".join(["─" * (col_width + 2)] * num_panels) + f"┘{RESET}"
     print(bot_border)
 
 # Expose everything from ultra_mega_ui at the very end of crazy_style to prevent circular import issues
@@ -2664,16 +2683,17 @@ def shop_item_card(name, cost, hp, dm, index):
     print(f"  {BOLD}{BRIGHT_CYAN}└{'─' * 30}┘{RESET}")
 
 
-def fancy_header(text, emoji="⚡", width=50):
+def fancy_header(text, emoji="⚡", width=60):
     """Display a fancy section header."""
     print()
-    print(f"  {BOLD}{random.choice(ALL_COLORS)}{'━' * width}{RESET}")
-    centered = f"{emoji}  {text}  {emoji}"
-    pad_total = width - len(centered)
+    border = gradient_text('━' * width, (120, 0, 255), (0, 255, 180))
+    print(f"  {border}{RESET}")
+    centered = f" {emoji}  {text}  {emoji} "
+    pad_total = max(width - len(centered), 0)
     left_pad = pad_total // 2
     right_pad = pad_total - left_pad
-    print(f"  {BOLD}{random.choice(ALL_COLORS)}{' ' * left_pad}{rainbow_text(centered)}{' ' * right_pad}{RESET}")
-    print(f"  {BOLD}{random.choice(ALL_COLORS)}{'━' * width}{RESET}")
+    print(f"  {BOLD}{BRIGHT_WHITE}{' ' * left_pad}{rainbow_text(centered)}{' ' * right_pad}{RESET}")
+    print(f"  {border}{RESET}")
     print()
 
 
@@ -51271,216 +51291,6 @@ def cinematic_sequence_16():
         time.sleep(0.01)
     print()
 
-def cinematic_sequence_17():
-    """Play cinematic sequence 17"""
-    frames = [
-        '''
-🌟
-          💥
-''',
-        '''
- 🌟🌟
-         💥💥
-''',
-        '''
-  🌟🌟🌟
-        💥💥💥
-''',
-        '''
-   🌟🌟🌟🌟
-       💥
-''',
-        '''
-    🌟🌟🌟🌟🌟
-      💥💥
-''',
-        '''
-     🌟
-     💥💥💥
-''',
-        '''
-      🌟🌟
-    💥
-''',
-        '''
-       🌟🌟🌟
-   💥💥
-''',
-        '''
-        🌟🌟🌟🌟
-  💥💥💥
-''',
-        '''
-         🌟🌟🌟🌟🌟
- 💥
-''',
-        '''
-          🌟
-💥💥
-''',
-        '''
-           🌟🌟
-                   💥💥💥
-''',
-        '''
-            🌟🌟🌟
-                  💥
-''',
-        '''
-             🌟🌟🌟🌟
-                 💥💥
-''',
-        '''
-              🌟🌟🌟🌟🌟
-                💥💥💥
-''',
-        '''
-               🌟
-               💥
-''',
-        '''
-                🌟🌟
-              💥💥
-''',
-        '''
-                 🌟🌟🌟
-             💥💥💥
-''',
-        '''
-                  🌟🌟🌟🌟
-            💥
-''',
-        '''
-                   🌟🌟🌟🌟🌟
-           💥💥
-''',
-        '''
-🌟
-          💥💥💥
-''',
-        '''
- 🌟🌟
-         💥
-''',
-        '''
-  🌟🌟🌟
-        💥💥
-''',
-        '''
-   🌟🌟🌟🌟
-       💥💥💥
-''',
-        '''
-    🌟🌟🌟🌟🌟
-      💥
-''',
-        '''
-     🌟
-     💥💥
-''',
-        '''
-      🌟🌟
-    💥💥💥
-''',
-        '''
-       🌟🌟🌟
-   💥
-''',
-        '''
-        🌟🌟🌟🌟
-  💥💥
-''',
-        '''
-         🌟🌟🌟🌟🌟
- 💥💥💥
-''',
-        '''
-          🌟
-💥
-''',
-        '''
-           🌟🌟
-                   💥💥
-''',
-        '''
-            🌟🌟🌟
-                  💥💥💥
-''',
-        '''
-             🌟🌟🌟🌟
-                 💥
-''',
-        '''
-              🌟🌟🌟🌟🌟
-                💥💥
-''',
-        '''
-               🌟
-               💥💥💥
-''',
-        '''
-                🌟🌟
-              💥
-''',
-        '''
-                 🌟🌟🌟
-             💥💥
-''',
-        '''
-                  🌟🌟🌟🌟
-            💥💥💥
-''',
-        '''
-                   🌟🌟🌟🌟🌟
-           💥
-''',
-        '''
-🌟
-          💥💥
-''',
-        '''
- 🌟🌟
-         💥💥💥
-''',
-        '''
-  🌟🌟🌟
-        💥
-''',
-        '''
-   🌟🌟🌟🌟
-       💥💥
-''',
-        '''
-    🌟🌟🌟🌟🌟
-      💥💥💥
-''',
-        '''
-     🌟
-     💥
-''',
-        '''
-      🌟🌟
-    💥💥
-''',
-        '''
-       🌟🌟🌟
-   💥💥💥
-''',
-        '''
-        🌟🌟🌟🌟
-  💥
-''',
-        '''
-         🌟🌟🌟🌟🌟
- 💥💥
-''',
-    ]
-    for f in frames:
-        sys.stdout.write('\r' + f.replace('\n', ''))
-        sys.stdout.flush()
-        time.sleep(0.01)
-    print()
-
 def cinematic_sequence_18():
     """Play cinematic sequence 18"""
     frames = [
@@ -53793,216 +53603,6 @@ def cinematic_sequence_28():
 
 def cinematic_sequence_29():
     """Play cinematic sequence 29"""
-    frames = [
-        '''
-🌟
-          💥
-''',
-        '''
- 🌟🌟
-         💥💥
-''',
-        '''
-  🌟🌟🌟
-        💥💥💥
-''',
-        '''
-   🌟🌟🌟🌟
-       💥
-''',
-        '''
-    🌟🌟🌟🌟🌟
-      💥💥
-''',
-        '''
-     🌟
-     💥💥💥
-''',
-        '''
-      🌟🌟
-    💥
-''',
-        '''
-       🌟🌟🌟
-   💥💥
-''',
-        '''
-        🌟🌟🌟🌟
-  💥💥💥
-''',
-        '''
-         🌟🌟🌟🌟🌟
- 💥
-''',
-        '''
-          🌟
-💥💥
-''',
-        '''
-           🌟🌟
-                   💥💥💥
-''',
-        '''
-            🌟🌟🌟
-                  💥
-''',
-        '''
-             🌟🌟🌟🌟
-                 💥💥
-''',
-        '''
-              🌟🌟🌟🌟🌟
-                💥💥💥
-''',
-        '''
-               🌟
-               💥
-''',
-        '''
-                🌟🌟
-              💥💥
-''',
-        '''
-                 🌟🌟🌟
-             💥💥💥
-''',
-        '''
-                  🌟🌟🌟🌟
-            💥
-''',
-        '''
-                   🌟🌟🌟🌟🌟
-           💥💥
-''',
-        '''
-🌟
-          💥💥💥
-''',
-        '''
- 🌟🌟
-         💥
-''',
-        '''
-  🌟🌟🌟
-        💥💥
-''',
-        '''
-   🌟🌟🌟🌟
-       💥💥💥
-''',
-        '''
-    🌟🌟🌟🌟🌟
-      💥
-''',
-        '''
-     🌟
-     💥💥
-''',
-        '''
-      🌟🌟
-    💥💥💥
-''',
-        '''
-       🌟🌟🌟
-   💥
-''',
-        '''
-        🌟🌟🌟🌟
-  💥💥
-''',
-        '''
-         🌟🌟🌟🌟🌟
- 💥💥💥
-''',
-        '''
-          🌟
-💥
-''',
-        '''
-           🌟🌟
-                   💥💥
-''',
-        '''
-            🌟🌟🌟
-                  💥💥💥
-''',
-        '''
-             🌟🌟🌟🌟
-                 💥
-''',
-        '''
-              🌟🌟🌟🌟🌟
-                💥💥
-''',
-        '''
-               🌟
-               💥💥💥
-''',
-        '''
-                🌟🌟
-              💥
-''',
-        '''
-                 🌟🌟🌟
-             💥💥
-''',
-        '''
-                  🌟🌟🌟🌟
-            💥💥💥
-''',
-        '''
-                   🌟🌟🌟🌟🌟
-           💥
-''',
-        '''
-🌟
-          💥💥
-''',
-        '''
- 🌟🌟
-         💥💥💥
-''',
-        '''
-  🌟🌟🌟
-        💥
-''',
-        '''
-   🌟🌟🌟🌟
-       💥💥
-''',
-        '''
-    🌟🌟🌟🌟🌟
-      💥💥💥
-''',
-        '''
-     🌟
-     💥
-''',
-        '''
-      🌟🌟
-    💥💥
-''',
-        '''
-       🌟🌟🌟
-   💥💥💥
-''',
-        '''
-        🌟🌟🌟🌟
-  💥
-''',
-        '''
-         🌟🌟🌟🌟🌟
- 💥💥
-''',
-    ]
-    for f in frames:
-        sys.stdout.write('\r' + f.replace('\n', ''))
-        sys.stdout.flush()
-        time.sleep(0.01)
-    print()
-
-def cinematic_sequence_30():
-    """Play cinematic sequence 30"""
     frames = [
         '''
 🌟

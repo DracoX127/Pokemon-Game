@@ -1,11 +1,15 @@
 """
-Pokemon Game AI Chatbot - Rule-Based Foundation
-NO API keys, NO LLM downloads. Pure Python rule-based responses.
+Pokemon Game AI Chatbot.
+Uses rule-based helpers and OpenRouter for real AI responses when an API key is configured.
 """
 
+import os
 import re
 import math
 import random
+
+import requests
+
 from AI.responses import get_greeting, get_goodbye, get_fallback
 from AI.knowledge_base import (
     solve_math, get_physics_help, get_science_fact,
@@ -123,6 +127,15 @@ class PokemonChatbot:
                 "Why did Charizard fail the exam? It couldn't handle the heat! 🔥😄"
             ])
         
+        # Use OpenRouter if the user has configured an API key
+        if self._has_openrouter_key():
+            try:
+                openrouter_answer = self._openrouter_response(user_input)
+                if openrouter_answer:
+                    return openrouter_answer
+            except Exception:
+                pass
+
         # Fallback
         return get_fallback(text)
     
@@ -165,3 +178,43 @@ class PokemonChatbot:
     def _ask_joke(self, text):
         return any(w in text for w in ['joke', 'funny', 'laugh', 'humor',
                                         'tell me a joke', 'make me laugh'])
+
+    def _has_openrouter_key(self):
+        return bool(os.getenv('OPENROUTER_API_KEY') or os.getenv('OPENAI_API_KEY'))
+
+    def _openrouter_response(self, user_input):
+        api_key = os.getenv('OPENROUTER_API_KEY') or os.getenv('OPENAI_API_KEY')
+        if not api_key:
+            return None
+        headers = {
+            'Authorization': f'Bearer {api_key}',
+            'Content-Type': 'application/json',
+        }
+        payload = {
+            'model': 'gpt-4o-mini',
+            'messages': [
+                {
+                    'role': 'system',
+                    'content': (
+                        'You are PokéBot, a friendly Pokemon game AI assistant. '
+                        'Answer clearly and helpfully, with Pokemon flair when appropriate. '
+                        'Keep responses concise and useful for game questions, math, science, and general chat.'
+                    ),
+                },
+                {'role': 'user', 'content': user_input},
+            ],
+            'temperature': 0.8,
+            'max_tokens': 300,
+        }
+
+        response = requests.post('https://openrouter.ai/api/v1/chat/completions', headers=headers, json=payload, timeout=25)
+        response.raise_for_status()
+        data = response.json()
+        if not isinstance(data, dict):
+            return None
+        choice = data.get('choices', [{}])[0]
+        message = choice.get('message') or {}
+        content = message.get('content') or choice.get('text')
+        if content:
+            return content.strip()
+        return None

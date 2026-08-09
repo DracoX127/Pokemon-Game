@@ -11,6 +11,19 @@ from moves_data import MOVES, get_effectiveness
 from inventory import ITEMS, apply_item_effect
 from status_manager import STATUS_EFFECTS, apply_status_tick, can_attack
 from weather_engine import WEATHER_EFFECTS, apply_weather_damage
+from update_systems import (
+    add_bond,
+    apply_item_drops,
+    ensure_pokemon_profile,
+    finish_battle_recap,
+    generate_item_drops,
+    get_battle_commentary,
+    maybe_bond_clutch_survival,
+    new_battle_recap,
+    record_battle_event,
+    render_battle_recap,
+    total_damage_multiplier,
+)
 import time
 import sys
 
@@ -153,6 +166,7 @@ def calculate_move_damage(move_name, attacker_stats, defender_type, weather="Cle
         atk_stage = stages.get("dm", 0)
     
     atk_mult *= stage_multiplier(stages, "dm")
+    atk_mult *= total_damage_multiplier(attacker_stats)
     
     base_damage = atk_stat * (move["power"] / 40.0) * atk_mult
     final_damage = base_damage * effectiveness
@@ -749,7 +763,7 @@ def make_pokemon(hp, dm, type_name, moves_list, speed=50, xp=0, lvl=1, maxxp=50,
         ability = get_ability_for_pokemon(name)
     if ability is None:
         ability = pick_ability_by_type(type_name)
-    return {
+    stats = {
         "hp": hp, "maxhp": hp, "dm": dm, "speed": speed,
         "xp": xp, "lvl": lvl, "maxxp": maxxp,
         "type": type_name, "moves": list(moves_list),
@@ -757,6 +771,7 @@ def make_pokemon(hp, dm, type_name, moves_list, speed=50, xp=0, lvl=1, maxxp=50,
         "status": None, "shiny": shiny, "generation": generation,
         "ability": ability, "hold_item": hold_item
     }
+    return ensure_pokemon_profile(stats, name=name, type_name=type_name)
 
 # ============================================================
 # NEW SYSTEM: Stage Multipliers & Stat Stage Management
@@ -788,6 +803,10 @@ def reset_stages(pokemon_stats):
 
 def take_damage(pokemon_stats, amount):
     """Apply damage to a pokemon, clamping HP at 0 so it never goes negative."""
+    endured, msg = maybe_bond_clutch_survival(pokemon_stats, amount)
+    if endured:
+        pokemon_stats["_last_bond_event"] = msg
+        return pokemon_stats["hp"]
     pokemon_stats["hp"] = max(0, pokemon_stats["hp"] - amount)
     return pokemon_stats["hp"]
 
@@ -1200,6 +1219,10 @@ def run_team_battle(player_team, enemy_team, weather, battle_context):
         battle_context = {"mode": str(battle_context)}
     battle_context.setdefault("player_team", player_team)
     battle_context.setdefault("inventory", {})
+    battle_recap = battle_context.setdefault(
+        "battle_recap",
+        new_battle_recap(battle_context.get("mode", "Battle"), enemy_team.keys()),
+    )
 
     py_index = {}
     for name, s in player_team.items():
@@ -1263,6 +1286,7 @@ def run_team_battle(player_team, enemy_team, weather, battle_context):
 
     while True:
         turn_count += 1
+        battle_recap.turns = turn_count
         battle_log.next_turn()
         print()
         battle_hud(player_active_name, player_active.get("hp", 0), player_active.get("maxhp", 1), player_active.get("dm", 0),
@@ -1487,14 +1511,24 @@ def run_team_battle(player_team, enemy_team, weather, battle_context):
                 if effectiveness > 1.0:
                     eff_msg = f"  {BRIGHT_GREEN}It's super effective!{RESET}"
                     type_effectiveness_flash(effectiveness)
+                    comment = get_battle_commentary("super_effective", move=chosen_move)
+                    battle_log.log(comment, BRIGHT_CYAN)
+                    record_battle_event(battle_recap, comment)
                 elif effectiveness < 1.0 and effectiveness > 0.0:
                     eff_msg = f"  {DIM}It's not very effective...{RESET}"
                     type_effectiveness_flash(effectiveness)
+                    comment = get_battle_commentary("resisted", move=chosen_move)
+                    battle_log.log(comment, BRIGHT_CYAN)
+                    record_battle_event(battle_recap, comment)
                 elif effectiveness == 0.0:
                     eff_msg = f"  {DIM}It doesn't affect {opp_name}...{RESET}"
                     type_effectiveness_flash(effectiveness)
 
                 take_damage(opp_stats, final_damage)
+                bond_msg = opp_stats.pop("_last_bond_event", "")
+                if bond_msg:
+                    battle_log.log(bond_msg, BRIGHT_YELLOW)
+                    record_battle_event(battle_recap, bond_msg)
                 if battle_context.get("env_rule") == "Vampiric Field" and final_damage > 0:
                     heal = max(1, int(final_damage * 0.10))
                     cur_stats["hp"] = min(cur_stats["hp"] + heal, cur_stats.get("maxhp", 1))
@@ -1505,6 +1539,9 @@ def run_team_battle(player_team, enemy_team, weather, battle_context):
                     animate_enemy_attack_sequence(cur_name, opp_name, final_damage)
                 if is_crit:
                     battle_log.log("Critical hit!", BRIGHT_YELLOW)
+                    crit_comment = get_battle_commentary("crit")
+                    battle_log.log(crit_comment, BRIGHT_CYAN)
+                    record_battle_event(battle_recap, crit_comment)
                     if not is_player:
                         log_persona_dialogue(persona, "crit", trainer_name)
                 battle_log.log(f"-{final_damage} HP to {opp_name}!", BRIGHT_RED)
@@ -1538,9 +1575,15 @@ def run_team_battle(player_team, enemy_team, weather, battle_context):
                 if 0 < ehp < emax * 0.30:
                     low_hp_triggered.add(enemy_active_name)
                     log_persona_dialogue(persona, "low_hp", trainer_name)
+                    comment = get_battle_commentary("low_hp", name=enemy_active_name)
+                    battle_log.log(comment, BRIGHT_CYAN)
+                    record_battle_event(battle_recap, comment)
 
             if opp_stats.get("hp", 0) <= 0:
                 battle_log.log(f"{opp_name} fainted!", BRIGHT_RED)
+                comment = get_battle_commentary("faint", name=opp_name)
+                battle_log.log(comment, BRIGHT_CYAN)
+                record_battle_event(battle_recap, comment)
                 km = apply_ko_ability(cur_stats)
                 for m in km:
                     battle_log.log(m, BRIGHT_CYAN)
@@ -1626,6 +1669,7 @@ def run_team_battle(player_team, enemy_team, weather, battle_context):
         for pname in participants:
             if pname in player_team:
                 ps = player_team[pname]
+                add_bond(ps, 4, reason=battle_context.get("mode", "battle"))
                 xp_gain = calculate_xp_gain(all_enemy_hp, ps.get("dm", 20), len(enemy_team), all_enemy_dm)
                 xp_dict[pname] = xp_gain
                 ps["xp"] = ps.get("xp", 0) + xp_gain
@@ -1635,11 +1679,31 @@ def run_team_battle(player_team, enemy_team, weather, battle_context):
                     ps = player_team[pname]
         money_gained = sum(s.get("lvl", 5) * 15 for s in enemy_team.values())
         print(f"  {BRIGHT_YELLOW}💰 Won {money_gained} coins!{RESET}")
+        drops = []
+        active_trait = player_team.get(player_active_name, {}).get("personality")
+        for enemy_name, enemy_stats in enemy_team.items():
+            drops.extend(
+                generate_item_drops(
+                    enemy_name,
+                    enemy_stats.get("type", "Normal"),
+                    enemy_stats.get("lvl", 1),
+                    enemy_stats.get("shiny", False),
+                    victory=True,
+                    trait=active_trait,
+                )
+            )
+        apply_item_drops(battle_context.get("inventory", {}), drops)
+        finish_battle_recap(battle_recap, True, xp_dict, money_gained, drops)
+        for line in render_battle_recap(battle_recap):
+            print(f"  {BRIGHT_CYAN}{line}{RESET}")
     else:
         print()
         print_art(LOSE_ART, fire_text)
         defeat_rain(lines=5, width=40)
         print(f"  {BOLD}{BRIGHT_RED}All your pokemon fainted...{RESET}")
+        finish_battle_recap(battle_recap, False, xp_dict, 0, [])
+        for line in render_battle_recap(battle_recap):
+            print(f"  {DIM}{line}{RESET}")
 
     return player_won, xp_dict, money_gained
 

@@ -58,7 +58,7 @@ from status_manager import apply_status_tick, can_attack
 from gym_data import GYM_LEADERS, ELITE_FOUR
 from world_map import REGIONS
 from fusion_dex import FUSION_DEX
-from moves_data import MOVES
+from moves_data import MOVES, get_effectiveness
 from inventory import ITEMS
 from ui_core import *
 from save_manager import save_game
@@ -83,6 +83,33 @@ from battle_frontier import (
     BATTLE_FRONTIER, RENTAL_POKEMON, BATTLE_HALL_OPPONENTS,
     get_rental_team, get_pike_room, get_battle_hall_order,
     get_frontier_progress, update_frontier_progress, count_frontier_symbols
+)
+from update_systems import (
+    BASE_ROOMS,
+    FACTIONS,
+    TM_RECIPES,
+    NotificationCenter,
+    add_reputation,
+    apply_item_drops,
+    apply_reward_bundle,
+    build_codex_entry,
+    calculate_catch_grade,
+    can_upgrade_room,
+    catch_grade_rewards,
+    craft_tm,
+    create_default_base,
+    create_default_reputation,
+    format_drops,
+    generate_item_drops,
+    generate_npc_trainer,
+    get_active_seasonal_events,
+    get_what_now_recommendations,
+    professor_advice,
+    preview_fusion,
+    reputation_title,
+    roll_fusion_result,
+    teach_tm_from_inventory,
+    upgrade_room,
 )
 pokemon = {}
 money = 500
@@ -113,6 +140,11 @@ daily_species_caught = set()
 
 # Battle Frontier progress
 frontier_progress = {}
+trainer_base = create_default_base()
+reputation = create_default_reputation()
+notification_center = NotificationCenter(poll_interval=5)
+cloud_last_save_info = None
+SAVE_VERSION = 3
 
 def robust_request(method, url, json_data=None, headers=None, timeout=30):
     """Make HTTP requests to the cloud server. No local fallback."""
@@ -121,9 +153,9 @@ def robust_request(method, url, json_data=None, headers=None, timeout=30):
     elif method == "GET":
         return requests.get(url, headers=headers, timeout=timeout)
 
-def is_server_running():
+def is_server_running(timeout=10):
     try:
-        r = requests.get(f"{SERVER_URL}/health", timeout=10)
+        r = requests.get(f"{SERVER_URL}/health", timeout=timeout)
         return r.status_code == 200
     except:
         return False
@@ -224,6 +256,8 @@ if gateway_opt == "1":
                     daily_raid_completed = data.get("daily_raid_completed", False)
                     daily_species_caught = set(data.get("daily_species_caught", []))
                     frontier_progress = data.get("frontier_progress", {})
+                    trainer_base = data.get("trainer_base", create_default_base())
+                    reputation = data.get("reputation", create_default_reputation())
                     load_success = True
                     print(f"\n  {BOLD}{BRIGHT_GREEN}✅ Game Loaded Successfully from Cloud!{RESET}")
                     time.sleep(1)
@@ -460,6 +494,209 @@ def run_settings_menu():
             print(f"  {theme_text('HUD & Bars updated!')}")
             delay_sleep(1.0)
 
+
+def build_game_state():
+    return {
+        "name": name,
+        "pokemon": pokemon,
+        "money": money,
+        "pvp_rp": pvp_rp,
+        "trophies": trophies,
+        "inventory": inventory,
+        "location": location,
+        "badges": badges,
+        "tower_record": tower_record,
+        "pokedex_seen": list(pokedex_seen),
+        "pokedex_caught": list(pokedex_caught),
+        "elite_four_defeated": elite_four_defeated,
+        "achievements": achievement_manager.to_dict(),
+        "heal_tickets": heal_tickets,
+        "daycare": daycare,
+        "shiny_chain": shiny_chain,
+        "last_encounter_species": last_encounter_species,
+        "login_streak": login_streak,
+        "last_login_date": last_login_date,
+        "daily_raid_completed": daily_raid_completed,
+        "daily_species_caught": list(daily_species_caught),
+        "frontier_progress": frontier_progress,
+        "trainer_base": trainer_base,
+        "reputation": reputation,
+        "daily_challenge": daily_challenge,
+    }
+
+
+def build_save_payload():
+    data = build_game_state()
+    data.pop("daily_challenge", None)
+    data["save_version"] = SAVE_VERSION
+    data["saved_at"] = datetime.now().replace(microsecond=0).isoformat()
+    data["save_summary"] = summarize_save_payload(data)
+    return data
+
+
+def summarize_save_payload(data):
+    team = data.get("pokemon", {}) or {}
+    inventory_data = data.get("inventory", {}) or {}
+    fainted = sum(1 for st in team.values() if isinstance(st, dict) and st.get("hp", 0) <= 0)
+    strongest = None
+    if team:
+        strongest = max(team.items(), key=lambda item: item[1].get("dm", 0) if isinstance(item[1], dict) else 0)[0]
+    return {
+        "trainer": data.get("name", "Trainer"),
+        "location": data.get("location", "Unknown"),
+        "team_count": len(team),
+        "fainted_count": fainted,
+        "strongest": strongest,
+        "money": data.get("money", 0),
+        "trophies": data.get("trophies", 0),
+        "badges_count": len(data.get("badges", []) or []),
+        "pokedex_caught": len(data.get("pokedex_caught", []) or []),
+        "inventory_types": len(inventory_data),
+        "title": reputation_title(data.get("reputation", {})),
+    }
+
+
+def format_save_summary(summary):
+    if not summary:
+        return [f"{DIM}No save summary available.{RESET}"]
+    return [
+        f"Trainer: {BRIGHT_GREEN}{summary.get('trainer', 'Trainer')}{RESET}  "
+        f"Title: {BRIGHT_YELLOW}{summary.get('title', 'Unknown')}{RESET}",
+        f"Location: {BRIGHT_CYAN}{summary.get('location', 'Unknown')}{RESET}  "
+        f"Team: {summary.get('team_count', 0)} ({summary.get('fainted_count', 0)} fainted)  "
+        f"Strongest: {summary.get('strongest') or 'none'}",
+        f"Coins: {summary.get('money', 0)}  Trophies: {summary.get('trophies', 0)}  "
+        f"Badges: {summary.get('badges_count', 0)}  Caught: {summary.get('pokedex_caught', 0)}  "
+        f"Bag Types: {summary.get('inventory_types', 0)}",
+    ]
+
+
+def get_response_json(response):
+    try:
+        return response.json()
+    except Exception:
+        return {"message": getattr(response, "text", "Invalid server response")}
+
+
+def cloud_auth_headers():
+    return {"Authorization": f"Bearer {cloud_token}"} if cloud_token else {}
+
+
+def render_save_card(title, summary, updated_at=None, byte_count=None):
+    fancy_header(title, emoji="💾", width=55)
+    if updated_at:
+        print(f"  {DIM}Updated: {updated_at}{RESET}")
+    if byte_count is not None:
+        print(f"  {DIM}Size: {byte_count} bytes{RESET}")
+    for line in format_save_summary(summary):
+        print(f"  {line}")
+    print()
+
+
+def apply_loaded_save_data(data):
+    global name, pokemon, money, pvp_rp, trophies, inventory, location, badges
+    global tower_record, pokedex_seen, pokedex_caught, elite_four_defeated
+    global heal_tickets, daycare, shiny_chain, last_encounter_species, login_streak
+    global last_login_date, daily_raid_completed, daily_species_caught, frontier_progress
+    global trainer_base, reputation
+
+    name = data.get("name", name)
+    pokemon = data.get("pokemon", pokemon)
+    money = data.get("money", money)
+    pvp_rp = data.get("pvp_rp", pvp_rp)
+    trophies = data.get("trophies", trophies)
+    inventory = data.get("inventory", inventory)
+    location = data.get("location", location)
+    badges = data.get("badges", badges)
+    tower_record = data.get("tower_record", tower_record)
+    pokedex_seen = set(data.get("pokedex_seen", []))
+    pokedex_caught = set(data.get("pokedex_caught", []))
+    elite_four_defeated = data.get("elite_four_defeated", [])
+    ach_data = data.get("achievements", {"unlocked": [], "counters": {}})
+    achievement_manager.__dict__.update(AchievementManager.from_dict(ach_data).__dict__)
+    heal_tickets = data.get("heal_tickets", heal_tickets)
+    daycare = data.get("daycare", daycare)
+    shiny_chain = data.get("shiny_chain", shiny_chain)
+    last_encounter_species = data.get("last_encounter_species", last_encounter_species)
+    login_streak = data.get("login_streak", login_streak)
+    last_login_date = data.get("last_login_date", last_login_date)
+    daily_raid_completed = data.get("daily_raid_completed", daily_raid_completed)
+    daily_species_caught = set(data.get("daily_species_caught", list(daily_species_caught)))
+    frontier_progress = data.get("frontier_progress", frontier_progress)
+    trainer_base = data.get("trainer_base", trainer_base)
+    reputation = data.get("reputation", reputation)
+
+
+def fetch_cloud_save_info():
+    if not cloud_token:
+        return None, "Login required."
+    try:
+        r = robust_request("GET", f"{SERVER_URL}/save-info", headers=cloud_auth_headers(), timeout=30)
+        payload = get_response_json(r)
+        if r.status_code == 200:
+            return payload, None
+        if r.status_code == 404:
+            fallback, fallback_err = pull_cloud_save_preview()
+            if fallback:
+                fallback.pop("save_data", None)
+                return fallback, None
+            return None, fallback_err.get("message", "No cloud save yet.") if fallback_err else "No cloud save yet."
+        return None, payload.get("message", "Cloud save info failed.")
+    except Exception as e:
+        return None, str(e)
+
+
+def push_cloud_save():
+    global cloud_last_save_info
+    if not cloud_token:
+        return False, {"message": "Login required."}
+    save_payload = build_save_payload()
+    save_data = json.dumps(save_payload)
+    r = robust_request("POST", f"{SERVER_URL}/save", json_data={"save_data": save_data}, headers=cloud_auth_headers(), timeout=30)
+    payload = get_response_json(r)
+    if r.status_code == 200:
+        payload.setdefault("summary", save_payload.get("save_summary"))
+        payload.setdefault("updated_at", save_payload.get("saved_at"))
+        payload.setdefault("byte_count", len(save_data.encode("utf-8")))
+        cloud_last_save_info = payload
+        notification_center.notify("Cloud Save", f"Saved {payload.get('byte_count', len(save_data))} bytes.", "reward")
+        return True, payload
+    return False, payload
+
+
+def pull_cloud_save_preview():
+    if not cloud_token:
+        return None, {"message": "Login required."}
+    r = robust_request("GET", f"{SERVER_URL}/load", headers=cloud_auth_headers(), timeout=30)
+    payload = get_response_json(r)
+    if r.status_code == 200:
+        if "summary" not in payload and payload.get("save_data"):
+            loaded = json.loads(payload["save_data"])
+            payload["summary"] = loaded.get("save_summary") or summarize_save_payload(loaded)
+            payload["updated_at"] = payload.get("updated_at") or loaded.get("saved_at")
+            payload["byte_count"] = payload.get("byte_count") or len(payload["save_data"].encode("utf-8"))
+        return payload, None
+    return None, payload
+
+
+def render_notification_panel():
+    notification_center.poll(build_game_state())
+    lines = notification_center.render(max_items=5)
+    if not lines:
+        return
+    width = max(len(line) for line in lines) + 6
+    border = f"  {BRIGHT_MAGENTA}╭{'─' * width}╮{RESET}"
+    print()
+    print(border)
+    for line in lines:
+        if line == "REALTIME NOTIFICATIONS":
+            content = f"{BOLD}{BRIGHT_CYAN}{line}{RESET}"
+        else:
+            content = f"{DIM}{line}{RESET}"
+        padded = content + ' ' * (width - len(line) - 2)
+        print(f"  {BRIGHT_MAGENTA}│{RESET} {padded} {BRIGHT_MAGENTA}│{RESET}")
+    print(f"  {BRIGHT_MAGENTA}╰{'─' * width}╯{RESET}")
+
 # ══════════════════════════════════════════════════
 # MAIN GAME LOOP
 # ══════════════════════════════════════════════════
@@ -527,18 +764,18 @@ try:
             roll = random.random()
             is_fusion = False
             
+            # Helper to strip numbers for species lookup
+            def clean_species_name(nm):
+                return nm.lower().rstrip("0123456789")
+
+            p1_clean = clean_species_name(p1_name)
+            p2_clean = clean_species_name(p2_name)
+
             # Masuda method: different species parents = tripled shiny rate
             is_masuda = (p1_clean != p2_clean)
             has_shiny_charm = inventory.get("Shiny Charm", 0) > 0
             shiny_rate = get_shiny_rate(chain=0, has_shiny_charm=has_shiny_charm, is_masuda=is_masuda, is_egg=True)
             shiny_roll = random.random() < shiny_rate
-            
-            # Helper to strip numbers for species lookup
-            def clean_species_name(nm):
-                return nm.lower().rstrip("0123456789")
-                
-            p1_clean = clean_species_name(p1_name)
-            p2_clean = clean_species_name(p2_name)
             
             if roll < 0.40:
                 baby_species = p1_clean
@@ -617,8 +854,8 @@ try:
         time_icon = get_time_icon()
         time_name = get_time_name()
         print()
-        fancy_header("MAIN MENU", emoji="🎮", width=50)
-        
+        fancy_header("MAIN MENU", emoji="🎮", width=66)
+        print("  " + " " * 2)
         # Build side-by-side panel grid dashboard
         p_left = (
             f"📍 REGION: {location.upper()}\n"
@@ -635,17 +872,20 @@ try:
             f"🎯 DAILY: {daily_challenge['daily_species'][0]}\n"
             f"👑 RAID: {'✅' if daily_raid_completed else '⬜'} {daily_challenge['daily_raid']['name']}"
         )
-        render_panel_grid([p_left, p_right, p_daily], width=56)
+        render_panel_grid([p_left, p_right, p_daily], width=86)
         print()
-        print(f"  {BOLD}{BRIGHT_RED}A.{RESET}  ⚔️  Adventure           {DIM}[Explore & battle]{RESET}")
-        print(f"  {BOLD}{BRIGHT_CYAN}B.{RESET}  🏆 Competitive        {DIM}[Towers, raids & PvP]{RESET}")
-        print(f"  {BOLD}{BRIGHT_GREEN}C.{RESET}  🎒 Management         {DIM}[Items, shop & fusion]{RESET}")
-        print(f"  {BOLD}{BRIGHT_MAGENTA}D.{RESET}  📊 Info & Social      {DIM}[Stats, pokedex & cloud]{RESET}")
-        print(f"  {BOLD}{BRIGHT_YELLOW}E.{RESET}  🗺️  World              {DIM}[Travel & daycare]{RESET}")
+        render_notification_panel()
+        print()
+        print(f"  {BOLD}{BRIGHT_RED}A.{RESET}  ⚔️  Adventure        {DIM}[Explore & battle]{RESET}")
+        print(f"  {BOLD}{BRIGHT_CYAN}B.{RESET}  🏆 Competitive     {DIM}[Towers, raids & PvP]{RESET}")
+        print(f"  {BOLD}{BRIGHT_GREEN}C.{RESET}  🎒 Management      {DIM}[Items, shop & fusion]{RESET}")
+        print(f"  {BOLD}{BRIGHT_MAGENTA}D.{RESET}  📊 Info & Social   {DIM}[Stats, pokedex & cloud]{RESET}")
+        print(f"  {BOLD}{BRIGHT_YELLOW}E.{RESET}  🗺️  World           {DIM}[Travel & daycare]{RESET}")
+        print(f"  {BOLD}{BRIGHT_WHITE}F.{RESET}  🔧 Nexus Hub       {DIM}[Professor, base & systems]{RESET}")
         print()
         print(f"  {BOLD}{DIM}S.{RESET} 💾 Save & Leave")
         print()
-        theme_divider(50)
+        theme_divider(62)
         category = crazy_input("Select category").strip().upper()
         
         # ══════════════════════════════════════
@@ -670,9 +910,9 @@ try:
             if adv_opt == "1":
                 option = 1
             elif adv_opt == "2":
-                option = 10
+                option = 11
             elif adv_opt == "3":
-                option = 12
+                option = 15
             elif adv_opt == "4":
                 option = 7
             elif adv_opt == "5":
@@ -701,7 +941,7 @@ try:
             if comp_opt == "1":
                 option = 3
             elif comp_opt == "2":
-                option = 11
+                option = 10
             elif comp_opt == "3":
                 option = 19
             elif comp_opt == "4":
@@ -726,6 +966,7 @@ try:
             egg_notif = f" {BOLD}{BRIGHT_YELLOW}[☁️ Egg Ready!]{RESET}" if daycare.get("egg_waiting") else ""
             print(f"  {BOLD}{BRIGHT_YELLOW}5.{RESET}  🏡 Daycare & Breeding {DIM}[Level & Breed]{RESET}{egg_notif}")
             print(f"  {BOLD}{BRIGHT_WHITE}6.{RESET}  ⚙️  Settings            {DIM}[Customize UI]{RESET}")
+            print(f"  {BOLD}{BRIGHT_CYAN}7.{RESET}  🛠️  TM Workshop         {DIM}[Craft & teach moves]{RESET}")
             print()
             print(f"  {BOLD}{DIM}Q.{RESET} Back")
             mgmt_opt = crazy_input("Choose").strip()
@@ -741,6 +982,8 @@ try:
                 option = 16
             elif mgmt_opt == "6":
                 option = 8
+            elif mgmt_opt == "7":
+                option = 25
             else:
                 option = 0
                 
@@ -755,6 +998,7 @@ try:
             print(f"  {BOLD}{BRIGHT_GREEN}3.{RESET}  📋 Quest Board        {DIM}[{len(quest_manager.active)} active]{RESET}")
             print(f"  {BOLD}{BRIGHT_CYAN}4.{RESET}  ☁️  Cloud Account       {DIM}[{cloud_username if cloud_token else 'Not logged in'}]{RESET}")
             print(f"  {BOLD}{BRIGHT_MAGENTA}5.{RESET}  🤖 AI Chatbot         {DIM}[Ask questions]{RESET}")
+            print(f"  {BOLD}{BRIGHT_YELLOW}6.{RESET}  📚 Codex Pokedex      {DIM}[Research logs]{RESET}")
             print()
             print(f"  {BOLD}{DIM}Q.{RESET} Back")
             info_opt = crazy_input("Choose").strip()
@@ -768,6 +1012,8 @@ try:
                 option = 9
             elif info_opt == "5":
                 option = 21
+            elif info_opt == "6":
+                option = 29
             else:
                 option = 0
                 
@@ -780,6 +1026,7 @@ try:
             print(f"  {BOLD}{BRIGHT_WHITE}1.{RESET}  🗺️  Travel              {DIM}[Change regions]{RESET}")
             egg_notif_e = f" {BOLD}{BRIGHT_YELLOW}[☁️ Egg Ready!]{RESET}" if daycare.get("egg_waiting") else ""
             print(f"  {BOLD}{BRIGHT_YELLOW}2.{RESET}  🏡 Daycare & Breeding {DIM}[Level & Breed]{RESET}{egg_notif_e}")
+            print(f"  {BOLD}{BRIGHT_MAGENTA}3.{RESET}  🌌 Seasonal Events    {DIM}[World modifiers]{RESET}")
             print()
             print(f"  {BOLD}{DIM}Q.{RESET} Back")
             world_opt = crazy_input("Choose").strip()
@@ -787,6 +1034,44 @@ try:
                 option = 7
             elif world_opt == "2":
                 option = 16
+            elif world_opt == "3":
+                option = 32
+            else:
+                option = 0
+
+        # ══════════════════════════════════════
+        # CATEGORY F: NEXUS HUB
+        # ══════════════════════════════════════
+        elif category == "F":
+            clear_screen()
+            fancy_header("NEXUS HUB", emoji="🔧", width=50)
+            print(f"  {BOLD}{BRIGHT_GREEN}1.{RESET}  ✅ What Now?           {DIM}[Smart next step]{RESET}")
+            print(f"  {BOLD}{BRIGHT_CYAN}2.{RESET}  🧪 AI Professor       {DIM}[Advice companion]{RESET}")
+            print(f"  {BOLD}{BRIGHT_YELLOW}3.{RESET}  🛠️  TM Workshop        {DIM}[Craft & teach moves]{RESET}")
+            print(f"  {BOLD}{BRIGHT_RED}4.{RESET}  🧑‍🤝‍🧑 Trainer Network    {DIM}[NPC rematches]{RESET}")
+            print(f"  {BOLD}{BRIGHT_BLUE}5.{RESET}  📚 Codex Pokedex     {DIM}[Research logs]{RESET}")
+            print(f"  {BOLD}{BRIGHT_MAGENTA}6.{RESET}  🏠 Trainer Base       {DIM}[Room upgrades]{RESET}")
+            print(f"  {BOLD}{BRIGHT_WHITE}7.{RESET}  🏛️  Reputation         {DIM}[Factions & titles]{RESET}")
+            print(f"  {BOLD}{BRIGHT_GREEN}8.{RESET}  🌌 Seasonal Events   {DIM}[Rotating bonuses]{RESET}")
+            print()
+            print(f"  {BOLD}{DIM}Q.{RESET} Back")
+            hub_opt = crazy_input("Choose").strip()
+            if hub_opt == "1":
+                option = 26
+            elif hub_opt == "2":
+                option = 27
+            elif hub_opt == "3":
+                option = 25
+            elif hub_opt == "4":
+                option = 28
+            elif hub_opt == "5":
+                option = 29
+            elif hub_opt == "6":
+                option = 30
+            elif hub_opt == "7":
+                option = 31
+            elif hub_opt == "8":
+                option = 32
             else:
                 option = 0
                 
@@ -889,6 +1174,8 @@ try:
                                battle_mode="Wild Encounter")
 
                     boption = 0
+                    catch_attempts = 0
+                    last_throw_rating = "RAW"
                     while boption != 4:
                         battle_log.next_turn()
                         for pn, ps in [(poke_choice, pokemon[poke_choice])]:
@@ -1021,6 +1308,19 @@ try:
                                 pokemon[poke_choice]["xp"] += xp_gain
                                 print(f"  {BOLD}{BRIGHT_CYAN}⭐ +{xp_gain} XP!{RESET}")
                                 trophies += 150 if is_shiny else 100
+                                drops = generate_item_drops(
+                                    wild,
+                                    enemytype,
+                                    level,
+                                    is_shiny,
+                                    victory=True,
+                                    trait=pokemon[poke_choice].get("personality"),
+                                )
+                                apply_item_drops(inventory, drops)
+                                if drops:
+                                    print(f"  {BOLD}{BRIGHT_GREEN}🎁 Drops: {format_drops(drops)}{RESET}")
+                                    notification_center.notify("Battle Drops", format_drops(drops), "reward")
+                                add_reputation(reputation, "Champion", 8, trainer_base)
                                 daily_species_caught.add(wild.lower())
                                 if pokemon[poke_choice]["xp"] >= pokemon[poke_choice]["maxxp"]:
                                     poke_choice = level_up_pokemon(pokemon, poke_choice)
@@ -1058,6 +1358,8 @@ try:
 
                         elif boption == 2:
                             # Catch logic
+                            catch_attempts += 1
+                            last_throw_rating = "RAW"
                             prob = 40
                             if is_shiny: prob -= 15
                             if "Ultra Ball" in inventory and inventory["Ultra Ball"] > 0: prob += 25
@@ -1109,24 +1411,29 @@ try:
                                         # Perfect: under 50% of time limit
                                         bonus_mult = 2.5
                                         rating = "⭐ PERFECT! ⭐"
+                                        last_throw_rating = "PERFECT"
                                         rating_color = BRIGHT_CYAN
                                     elif speed_ratio <= 0.75:
                                         # Great: under 75% of time limit
                                         bonus_mult = 2.0
                                         rating = " GREAT!"
+                                        last_throw_rating = "GREAT"
                                         rating_color = BRIGHT_GREEN
                                     else:
                                         # Good: within time limit
                                         bonus_mult = 1.5
                                         rating = "👍 GOOD!"
+                                        last_throw_rating = "GOOD"
                                         rating_color = BRIGHT_YELLOW
                                     
                                     prob = min(100, int(prob * bonus_mult))
                                     print(f"  {rating_color}{BOLD}{rating} ({elapsed:.2f}s){RESET}")
                                     print(f"  {BRIGHT_GREEN}Catch rate boosted to {prob}%!{RESET}")
                                 elif user_type == challenge_word.upper():
+                                    last_throw_rating = "SLOW"
                                     print(f"  {DIM}Too slow! ({elapsed:.2f}s > {time_limit:.1f}s) No bonus.{RESET}")
                                 else:
+                                    last_throw_rating = "MISS"
                                     print(f"  {DIM}Wrong word! Expected '{challenge_word}', got '{user_type}'. No bonus.{RESET}")
                             
                             spinner_animation("Throwing ball", duration=1.0)
@@ -1138,8 +1445,25 @@ try:
                                 elif "Ultra Ball" in inventory and inventory["Ultra Ball"] > 0:
                                     inventory["Ultra Ball"] -= 1
                                 
-                                pokemon[wild.lower()] = make_pokemon(original_enemyhp, enemydm, enemytype, enemymoves, enemyspeed, shiny=is_shiny)
+                                caught_stats = make_pokemon(original_enemyhp, enemydm, enemytype, enemymoves, enemyspeed, shiny=is_shiny, name=wild)
+                                grade_info = calculate_catch_grade({
+                                    "hp_ratio": max(0, enemyhp / original_enemyhp) if original_enemyhp > 0 else 1,
+                                    "catch_probability": prob,
+                                    "attempts": catch_attempts,
+                                    "status": enemy_status,
+                                    "shiny": is_shiny,
+                                    "throw_rating": last_throw_rating,
+                                })
+                                reward = catch_grade_rewards(grade_info, enemytype, is_shiny)
+                                money += apply_reward_bundle(inventory, reward)
+                                caught_stats.setdefault("research", {}).setdefault("caught_grades", []).append(grade_info["grade"])
+                                pokemon[wild.lower()] = caught_stats
                                 pokedex_caught.add(wild.lower())
+                                print(f"  {BOLD}{BRIGHT_CYAN}🏅 Catch Grade: {grade_info['grade']} ({grade_info['score']}/120){RESET}")
+                                if reward.get("coins") or reward.get("items"):
+                                    print(f"  {BOLD}{BRIGHT_GREEN}🎁 Grade Rewards: +{reward.get('coins', 0)} coins, {format_drops([{'item': k, 'qty': v} for k, v in reward.get('items', {}).items()])}{RESET}")
+                                notification_center.notify("Catch Grade", f"{wild} earned {grade_info['grade']} grade.", "reward")
+                                add_reputation(reputation, "Collector", max(4, grade_info["score"] // 12), trainer_base)
                                 for qid, q in quest_manager.hook_catch(enemytype, wild):
                                     print(f"  {BRIGHT_YELLOW}🎉 Quest #{qid} complete! {q['reward_desc']}!{RESET}")
                                 for a in achievement_manager.hook_catch(is_shiny):
@@ -1227,7 +1551,7 @@ try:
             max_player_lvl = max(s.get("lvl", 1) for s in pokemon.values())
             for i in range(2):
                 lvl = random.randint(1, max(5, max_player_lvl))
-                arena, hp, dm, typ, moves, shiny, spd = get_wild_pokemon(lvl, location)
+                arena, hp, dm, typ, moves, shiny, spd, _ = get_wild_pokemon(lvl, location)
                 arena_team[arena] = {"hp": hp, "maxhp": hp, "dm": dm, "speed": spd, "type": typ, "moves": moves, "lvl": lvl // 10 + 1}
             
             print(f"  {BOLD}{BRIGHT_CYAN}Enemy team:{RESET}")
@@ -1832,109 +2156,171 @@ try:
         # OPTION 9: CLOUD ACCOUNT
         # ══════════════════════════════════════
         if option == 9:
-            clear_screen()
-            fancy_header("CLOUD ACCOUNT", emoji="☁️", width=50)
-            status = f"{BRIGHT_GREEN}{cloud_username}{RESET}" if cloud_token else f"{DIM}Not logged in{RESET}"
-            print(f"  {BOLD}Status: {status}{RESET}")
-            print()
-            print(f"  {BOLD}{BRIGHT_WHITE}1.{RESET} Register new account")
-            print(f"  {BOLD}{BRIGHT_WHITE}2.{RESET} Login")
-            print(f"  {BOLD}{BRIGHT_WHITE}3.{RESET} Push save to cloud")
-            print(f"  {BOLD}{BRIGHT_WHITE}4.{RESET} Pull save from cloud")
-            print(f"  {BOLD}{BRIGHT_WHITE}5.{RESET} View registered accounts")
-            print(f"  {BOLD}{BRIGHT_WHITE}6.{RESET} Logout")
-            print(f"  {BOLD}{DIM}Q.{RESET} Back")
-            cloud_opt = crazy_input("Choose")
-            if cloud_opt == "1":
-                username = crazy_input("Username").strip()
-                password = crazy_input("Password").strip()
-                try:
-                    r = robust_request("POST", f"{SERVER_URL}/register", json_data={"username": username, "password": password}, timeout=30)
-                    if r.status_code == 201:
-                        print(f"  {BRIGHT_GREEN}✅ {r.json().get('message', 'Account created!')}{RESET}")
-                    else:
-                        print(f"  {BRIGHT_RED}❌ {r.json().get('message', 'Error')}{RESET}")
-                except Exception as e:
-                    print(f"  {BRIGHT_RED}❌ Server error: {e}{RESET}")
-                crazy_input("Press Enter to continue")
-            elif cloud_opt == "2":
-                username = crazy_input("Username").strip()
-                password = crazy_input("Password").strip()
-                try:
-        r = robust_request("POST", f"{SERVER_URL}/login", json_data={"username": username, "password": password}, timeout=30)
-                    if r.status_code == 200:
-                        cloud_token = r.json()["token"]
-                        cloud_username = r.json().get("username", username)
-                        print(f"  {BRIGHT_GREEN}✅ Logged in as {cloud_username}!{RESET}")
-                    else:
-                        print(f"  {BRIGHT_RED}❌ {r.json().get('message', 'Error')}{RESET}")
-                except Exception as e:
-                    print(f"  {BRIGHT_RED}❌ Server error: {e}{RESET}")
-                crazy_input("Press Enter to continue")
-            elif cloud_opt == "3" and cloud_token:
-                try:
-                    save_data = json.dumps({"name": name, "pokemon": pokemon, "money": money, "trophies": trophies, "inventory": inventory, "location": location, "badges": badges, "tower_record": tower_record, "pokedex_seen": list(pokedex_seen), "pokedex_caught": list(pokedex_caught), "elite_four_defeated": elite_four_defeated, "achievements": achievement_manager.to_dict(), "heal_tickets": heal_tickets, "daycare": daycare, "pvp_rp": pvp_rp, "shiny_chain": shiny_chain, "last_encounter_species": last_encounter_species, "login_streak": login_streak, "last_login_date": last_login_date, "daily_raid_completed": daily_raid_completed, "daily_species_caught": list(daily_species_caught), "frontier_progress": frontier_progress})
-                    r = robust_request("POST", f"{SERVER_URL}/save", json_data={"save_data": save_data}, headers={"Authorization": f"Bearer {cloud_token}"}, timeout=30)
-                    if r.status_code == 200:
-                        print(f"  {BRIGHT_GREEN}✅ {r.json().get('message', 'Save pushed to cloud!')}{RESET}")
-                    else:
-                        print(f"  {BRIGHT_RED}❌ {r.json().get('message', 'Error')}{RESET}")
-                except Exception as e:
-                    print(f"  {BRIGHT_RED}❌ Server error: {e}{RESET}")
-                crazy_input("Press Enter to continue")
-            elif cloud_opt == "4" and cloud_token:
-                try:
-                    r = robust_request("GET", f"{SERVER_URL}/load", headers={"Authorization": f"Bearer {cloud_token}"}, timeout=30)
-                    if r.status_code == 200:
-                        data = json.loads(r.json()["save_data"])
-                        name = data.get("name", name)
-                        pokemon = data.get("pokemon", pokemon)
-                        money = data.get("money", money)
-                        trophies = data.get("trophies", trophies)
-                        inventory = data.get("inventory", inventory)
-                        location = data.get("location", location)
-                        badges = data.get("badges", badges)
-                        tower_record = data.get("tower_record", tower_record)
-                        pokedex_seen = set(data.get("pokedex_seen", []))
-                        pokedex_caught = set(data.get("pokedex_caught", []))
-                        elite_four_defeated = data.get("elite_four_defeated", [])
-                        ach_data = data.get("achievements", {"unlocked":[],"counters":{}})
-                        achievement_manager.__dict__.update(AchievementManager.from_dict(ach_data).__dict__)
-                        heal_tickets = data.get("heal_tickets", heal_tickets)
-                        daycare = data.get("daycare", daycare)
-                        pvp_rp = data.get("pvp_rp", pvp_rp)
-                        print(f"  {BRIGHT_GREEN}✅ Save loaded from cloud!{RESET}")
-                    else:
-                        print(f"  {BRIGHT_RED}❌ {r.json().get('message', 'Error')}{RESET}")
-                except Exception as e:
-                    print(f"  {BRIGHT_RED}❌ Server error: {e}{RESET}")
-                crazy_input("Press Enter to continue")
-            elif cloud_opt == "5":
+            if cloud_token and cloud_last_save_info is None:
+                info, err = fetch_cloud_save_info()
+                if info:
+                    cloud_last_save_info = info
+            while True:
                 clear_screen()
-                fancy_header("REGISTERED ACCOUNTS", emoji="👥", width=50)
-                try:
-                    r = robust_request("GET", f"{SERVER_URL}/accounts", timeout=30)
-                    if r.status_code == 200:
-                        accounts = r.json().get("accounts", [])
-                        total = r.json().get("total", 0)
-                        print(f"  {BOLD}{BRIGHT_CYAN}Total accounts: {total}{RESET}")
-                        print()
-                        if accounts:
+                fancy_header("CLOUD SAVE CENTER", emoji="☁️", width=58)
+                status = f"{BRIGHT_GREEN}{cloud_username}{RESET}" if cloud_token else f"{BRIGHT_RED}Not logged in{RESET}"
+                server_status = f"{BRIGHT_GREEN}Online{RESET}" if is_server_running(timeout=2) else f"{BRIGHT_RED}Unavailable{RESET}"
+                print(f"  {BOLD}Account:{RESET} {status}  {BOLD}Server:{RESET} {server_status}")
+                print()
+
+                local_payload = build_save_payload()
+                render_save_card("LOCAL SAVE READY", local_payload.get("save_summary"), local_payload.get("saved_at"), len(json.dumps(local_payload).encode("utf-8")))
+
+                if cloud_last_save_info:
+                    render_save_card(
+                        "LAST CLOUD SNAPSHOT",
+                        cloud_last_save_info.get("summary"),
+                        cloud_last_save_info.get("updated_at"),
+                        cloud_last_save_info.get("byte_count"),
+                    )
+                else:
+                    print(f"  {DIM}No cloud snapshot loaded yet. Use Refresh after logging in.{RESET}\n")
+
+                print(f"  {BOLD}{BRIGHT_GREEN}1.{RESET} Quick Save to Cloud")
+                print(f"  {BOLD}{BRIGHT_CYAN}2.{RESET} Pull Cloud Save")
+                print(f"  {BOLD}{BRIGHT_YELLOW}3.{RESET} Refresh Cloud Snapshot")
+                print(f"  {BOLD}{BRIGHT_WHITE}4.{RESET} Login / Switch Account")
+                print(f"  {BOLD}{BRIGHT_MAGENTA}5.{RESET} Register New Account")
+                print(f"  {BOLD}{BRIGHT_BLUE}6.{RESET} View Registered Accounts")
+                print(f"  {BOLD}{BRIGHT_RED}7.{RESET} Logout")
+                print(f"  {BOLD}{DIM}Q.{RESET} Back")
+                cloud_opt = crazy_input("Choose").strip().lower()
+
+                if cloud_opt == "q":
+                    break
+
+                if cloud_opt == "1":
+                    if not cloud_token:
+                        print(f"  {BOLD}{BRIGHT_RED}❌ Login before saving to cloud.{RESET}")
+                    else:
+                        try:
+                            spinner_animation("Saving trainer profile", duration=0.8)
+                            ok, payload = push_cloud_save()
+                            if ok:
+                                print(f"  {BOLD}{BRIGHT_GREEN}✅ Cloud save complete!{RESET}")
+                                render_save_card("SAVED SNAPSHOT", payload.get("summary"), payload.get("updated_at"), payload.get("byte_count"))
+                            else:
+                                print(f"  {BOLD}{BRIGHT_RED}❌ {payload.get('message', 'Cloud save failed')}{RESET}")
+                                if payload.get("message", "").lower().startswith("token"):
+                                    cloud_token = None
+                                    cloud_username = None
+                        except Exception as e:
+                            print(f"  {BRIGHT_RED}❌ Server error: {e}{RESET}")
+                    crazy_input("Press Enter to continue")
+
+                elif cloud_opt == "2":
+                    if not cloud_token:
+                        print(f"  {BOLD}{BRIGHT_RED}❌ Login before loading from cloud.{RESET}")
+                        crazy_input("Press Enter to continue")
+                        continue
+                    try:
+                        spinner_animation("Fetching cloud save", duration=0.8)
+                        payload, err = pull_cloud_save_preview()
+                        if err:
+                            print(f"  {BOLD}{BRIGHT_RED}❌ {err.get('message', 'Cloud load failed')}{RESET}")
+                            crazy_input("Press Enter to continue")
+                            continue
+                        cloud_last_save_info = payload
+                        clear_screen()
+                        render_save_card("LOCAL SAVE", local_payload.get("save_summary"), local_payload.get("saved_at"), len(json.dumps(local_payload).encode("utf-8")))
+                        render_save_card("CLOUD SAVE TO LOAD", payload.get("summary"), payload.get("updated_at"), payload.get("byte_count"))
+                        print(f"  {BOLD}{BRIGHT_RED}Loading will replace your current local session state.{RESET}")
+                        confirm = crazy_input("Type LOAD to confirm").strip()
+                        if confirm == "LOAD":
+                            apply_loaded_save_data(json.loads(payload["save_data"]))
+                            notification_center.notify("Cloud Load", "Cloud save loaded into this session.", "event")
+                            print(f"  {BOLD}{BRIGHT_GREEN}✅ Cloud save loaded!{RESET}")
+                        else:
+                            print(f"  {DIM}Cloud load cancelled. Local session unchanged.{RESET}")
+                    except Exception as e:
+                        print(f"  {BRIGHT_RED}❌ Server error: {e}{RESET}")
+                    crazy_input("Press Enter to continue")
+
+                elif cloud_opt == "3":
+                    if not cloud_token:
+                        print(f"  {BOLD}{BRIGHT_RED}❌ Login before refreshing cloud status.{RESET}")
+                    else:
+                        info, err = fetch_cloud_save_info()
+                        if info:
+                            cloud_last_save_info = info
+                            print(f"  {BOLD}{BRIGHT_GREEN}✅ Cloud snapshot refreshed.{RESET}")
+                            render_save_card("CLOUD SNAPSHOT", info.get("summary"), info.get("updated_at"), info.get("byte_count"))
+                        else:
+                            print(f"  {BOLD}{BRIGHT_YELLOW}ℹ️ {err}{RESET}")
+                    crazy_input("Press Enter to continue")
+
+                elif cloud_opt == "4":
+                    username = crazy_input("Username").strip()
+                    password = crazy_input("Password").strip()
+                    try:
+                        spinner_animation("Logging in", duration=0.6)
+                        r = robust_request("POST", f"{SERVER_URL}/login", json_data={"username": username, "password": password}, timeout=30)
+                        payload = get_response_json(r)
+                        if r.status_code == 200:
+                            cloud_token = payload["token"]
+                            cloud_username = payload.get("username", username)
+                            cloud_last_save_info, _ = fetch_cloud_save_info()
+                            print(f"  {BOLD}{BRIGHT_GREEN}✅ Logged in as {cloud_username}!{RESET}")
+                        else:
+                            print(f"  {BOLD}{BRIGHT_RED}❌ {payload.get('message', 'Login failed')}{RESET}")
+                    except Exception as e:
+                        print(f"  {BRIGHT_RED}❌ Server error: {e}{RESET}")
+                    crazy_input("Press Enter to continue")
+
+                elif cloud_opt == "5":
+                    username = crazy_input("Choose Username").strip()
+                    password = crazy_input("Choose Password").strip()
+                    try:
+                        r = robust_request("POST", f"{SERVER_URL}/register", json_data={"username": username, "password": password}, timeout=30)
+                        payload = get_response_json(r)
+                        if r.status_code == 201:
+                            print(f"  {BOLD}{BRIGHT_GREEN}✅ {payload.get('message', 'Account created!')}{RESET}")
+                            login_r = robust_request("POST", f"{SERVER_URL}/login", json_data={"username": username, "password": password}, timeout=30)
+                            login_payload = get_response_json(login_r)
+                            if login_r.status_code == 200:
+                                cloud_token = login_payload["token"]
+                                cloud_username = login_payload.get("username", username)
+                                cloud_last_save_info = None
+                                print(f"  {BOLD}{BRIGHT_GREEN}✅ Auto-login complete. Use Quick Save when ready.{RESET}")
+                        else:
+                            print(f"  {BOLD}{BRIGHT_RED}❌ {payload.get('message', 'Registration failed')}{RESET}")
+                    except Exception as e:
+                        print(f"  {BRIGHT_RED}❌ Server error: {e}{RESET}")
+                    crazy_input("Press Enter to continue")
+
+                elif cloud_opt == "6":
+                    clear_screen()
+                    fancy_header("REGISTERED ACCOUNTS", emoji="👥", width=58)
+                    try:
+                        r = robust_request("GET", f"{SERVER_URL}/accounts", timeout=30)
+                        payload = get_response_json(r)
+                        if r.status_code == 200:
+                            accounts = payload.get("accounts", [])
+                            print(f"  {BOLD}{BRIGHT_CYAN}Total accounts: {payload.get('total', len(accounts))}{RESET}\n")
                             for i, acc in enumerate(accounts, 1):
                                 created = acc.get("created", "unknown")
-                                print(f"  {BOLD}{BRIGHT_WHITE}{i}.{RESET} {BRIGHT_GREEN}{acc['username']}{RESET} {DIM}(since {created}){RESET}")
+                                save_at = acc.get("save_updated_at") or "no save"
+                                print(f"  {BOLD}{BRIGHT_WHITE}{i}.{RESET} {BRIGHT_GREEN}{acc['username']}{RESET}")
+                                print(f"     {DIM}Created: {created} | Cloud save: {save_at}{RESET}")
+                            if not accounts:
+                                print(f"  {DIM}No accounts registered yet.{RESET}")
                         else:
-                            print(f"  {DIM}No accounts registered yet.{RESET}")
-                    else:
-                        print(f"  {BRIGHT_RED}❌ {r.json().get('message', 'Error')}{RESET}")
-                except Exception as e:
-                    print(f"  {BRIGHT_RED}❌ Server error: {e}{RESET}")
-                crazy_input("Press Enter to continue")
-            elif cloud_opt == "6":
-                cloud_token = None
-                cloud_username = None
-                print(f"  {BRIGHT_YELLOW}Logged out.{RESET}")
-                crazy_input("Press Enter to continue")
+                            print(f"  {BRIGHT_RED}❌ {payload.get('message', 'Error')}{RESET}")
+                    except Exception as e:
+                        print(f"  {BRIGHT_RED}❌ Server error: {e}{RESET}")
+                    crazy_input("Press Enter to continue")
+
+                elif cloud_opt == "7":
+                    cloud_token = None
+                    cloud_username = None
+                    cloud_last_save_info = None
+                    print(f"  {BRIGHT_YELLOW}Logged out. Local session is still active.{RESET}")
+                    crazy_input("Press Enter to continue")
 
         # ══════════════════════════════════════
         # OPTION 10: GYM CHALLENGE
@@ -2093,7 +2479,7 @@ try:
                     if is_boss_round:
                         level = int(level * 1.5)  # Boss is 50% stronger
                     
-                    ename, ehp, edm, etyp, emoves, eshiny, espd = get_wild_pokemon(level, location)
+                    ename, ehp, edm, etyp, emoves, eshiny, espd, _ = get_wild_pokemon(level, location)
                     if eshiny:
                         ehp, edm = int(ehp * 1.3), int(edm * 1.3)
                     
@@ -2234,78 +2620,42 @@ try:
                 time.sleep(1)
                 continue
 
-            spinner_animation("Initializing fusion reactor", duration=1.5)
-
-            # Generate fusion name
-            name1 = p1.lower()
-            name2 = p2.lower()
-            part1 = name1[:len(name1)//2]
-            part2 = name2[len(name2)//2:]
-            f_name = (part1 + part2).capitalize()
-
-            # Calculate average stats
-            avg_hp = (pokemon[p1]["maxhp"] + pokemon[p2]["maxhp"]) // 2
-            avg_dm = (pokemon[p1]["dm"] + pokemon[p2]["dm"]) // 2
-            avg_spd = (pokemon[p1].get("speed", 50) + pokemon[p2].get("speed", 50)) // 2
-
-            # Look up expected fusion stats from the 233K-entry FUSION_DEX
-            dex_fusion = FUSION_DEX.get(f_name.lower())
-            if dex_fusion:
-                dex_hp = dex_fusion["hp"]
-                dex_dm = dex_fusion["dm"]
-                dex_speed = dex_fusion.get("speed", avg_spd)
-                dex_type = dex_fusion.get("type", "Normal")
-                dex_moves = dex_fusion.get("moves", ["Tackle"])
-            else:
-                dex_hp, dex_dm, dex_speed = avg_hp, avg_dm, avg_spd
-                dex_type, dex_moves = pokemon[p1].get("type", "Normal"), list(set(pokemon[p1].get("moves", ["Tackle"]) + pokemon[p2].get("moves", ["Tackle"])))[:4]
-
-            # Show expected base from fusion database
-            print(f"  {BOLD}{BRIGHT_CYAN}📊 Fusion Database entry found!{RESET}")
-            print(f"  {DIM}Expected base stats: HP {dex_hp} | DM {dex_dm} | SPD {dex_speed}{RESET}")
+            preview = preview_fusion(p1, pokemon[p1], p2, pokemon[p2], FUSION_DEX, trainer_base)
+            fancy_header("FUSION PREVIEW", emoji="🔬", width=50)
+            print(f"  {BOLD}{BRIGHT_CYAN}{p1.upper()} + {p2.upper()} -> {preview['name'].upper()}{RESET}")
+            print(f"  {BOLD}Rank:{RESET} {BRIGHT_YELLOW}{preview['rank']}{RESET}  "
+                  f"{BOLD}Stability:{RESET} {BRIGHT_GREEN}{preview['stability']}{RESET} "
+                  f"({preview['stability_score']}/100)")
+            print(f"  {DIM}Mutation chance: {preview['mutation_chance'] * 100:.1f}% ({preview['mutation_hint']}){RESET}")
+            print(f"  {DIM}Base preview: HP {preview['base_hp']} | DM {preview['base_dm']} | SPD {preview['base_speed']} | Type {preview['type']}{RESET}")
+            print(f"  {DIM}Moves: {', '.join(preview['moves'])}{RESET}")
             print()
+            confirm_fusion = crazy_input("Commit these two Pokemon to the reactor? (y/n)")
+            if confirm_fusion.lower() != "y":
+                print(f"  {DIM}Fusion cancelled. No Pokemon were changed.{RESET}")
+                crazy_input("Press Enter to continue")
+                continue
 
-            # Determine outcome tier
-            outcome_roll = random.random()
-            if outcome_roll < 0.04:  # 4% - CRAZY
-                hp_mult = random.uniform(2.5, 4.0)
-                dm_mult = random.uniform(2.5, 4.0)
-                spd_mult = random.uniform(2.0, 3.5)
-                tier_name = "CRAZY"
-                tier_color = BRIGHT_MAGENTA
-                tier_emoji = "💥💎🔥"
-            elif outcome_roll < 0.10:  # 6% - SHIT
-                hp_mult = random.uniform(0.6, 0.9)
-                dm_mult = random.uniform(0.6, 0.9)
-                spd_mult = random.uniform(0.6, 0.9)
-                tier_name = "SHIT"
-                tier_color = BRIGHT_RED
-                tier_emoji = "💩💩💩"
-            else:  # 90% - Decent
-                hp_mult = random.uniform(1.0, 1.3)
-                dm_mult = random.uniform(1.0, 1.3)
-                spd_mult = random.uniform(1.0, 1.3)
-                tier_name = "DECENT"
-                tier_color = BRIGHT_GREEN
-                tier_emoji = "✨"
-
-            f_hp = int(dex_hp * hp_mult)
-            f_dm = int(dex_dm * dm_mult)
-            f_spd = int(dex_speed * spd_mult)
-
-            f_type = dex_type
-            f_moves = dex_moves
+            spinner_animation("Initializing fusion reactor", duration=1.5)
+            fusion_result = roll_fusion_result(preview)
+            f_name = fusion_result["name"]
+            f_hp = fusion_result["hp"]
+            f_dm = fusion_result["dm"]
+            f_spd = fusion_result["speed"]
+            f_type = fusion_result["type"]
+            f_moves = fusion_result["moves"]
 
             # Show result
             print_art(VICTORY_ROYALE_ART, rainbow_text)
             sparkle_burst(duration=1.0, width=50)
-            print(f"  {tier_color}{BOLD}{tier_emoji} FUSION RESULT: {tier_name} {tier_emoji}{RESET}")
+            print(f"  {BRIGHT_MAGENTA}{BOLD}🧬 FUSION RESULT: {fusion_result['rank']} RANK / {fusion_result['stability']} / {fusion_result['mutation']} MUTATION{RESET}")
             explode_print(f"{p1} + {p2} = {f_name}!")
 
-            print(f"  {BOLD}{BRIGHT_CYAN}HP: {dex_hp} × {hp_mult:.2f} = {f_hp}{RESET}")
-            print(f"  {BOLD}{BRIGHT_RED}DM: {dex_dm} × {dm_mult:.2f} = {f_dm}{RESET}")
-            print(f"  {BOLD}{BRIGHT_YELLOW}SPD: {dex_speed} × {spd_mult:.2f} = {f_spd}{RESET}")
+            print(f"  {BOLD}{BRIGHT_CYAN}HP: {preview['base_hp']} × {fusion_result['final_mult']:.2f} = {f_hp}{RESET}")
+            print(f"  {BOLD}{BRIGHT_RED}DM: {preview['base_dm']} × {fusion_result['final_mult']:.2f} = {f_dm}{RESET}")
+            print(f"  {BOLD}{BRIGHT_YELLOW}SPD: {preview['base_speed']} × {fusion_result['final_mult']:.2f} = {f_spd}{RESET}")
             print(f"  {BOLD}{BRIGHT_WHITE}Generation: {new_gen}/5{RESET}")
+            print(f"  {DIM}{fusion_result['mutation_note']}{RESET}")
             print()
 
             # Parent types for secret move check
@@ -2346,7 +2696,16 @@ try:
             # Create the fused pokemon
             del pokemon[p1]
             del pokemon[p2]
-            pokemon[f_name.lower()] = make_pokemon(f_hp, f_dm, f_type, f_moves, speed=f_spd, generation=new_gen)
+            fused_stats = make_pokemon(f_hp, f_dm, f_type, f_moves, speed=f_spd, generation=new_gen, name=f_name)
+            fused_stats["fusion_stability"] = fusion_result["stability"]
+            fused_stats["fusion_mutation"] = fusion_result["mutation"]
+            fused_stats["fusion_rank"] = fusion_result["rank"]
+            fused_stats["origin_note"] = f"Fusion Lab result from {p1} and {p2}"
+            fused_stats.setdefault("research", {})["fusions"] = 1
+            pokemon[f_name.lower()] = fused_stats
+            add_reputation(reputation, "Scientist", 10, trainer_base)
+            add_reputation(reputation, "Fusion Scholar", 15 if fusion_result["mutation"] != "None" else 8, trainer_base)
+            notification_center.notify("Fusion Complete", f"{f_name} is {fusion_result['stability']} / {fusion_result['mutation']}.", "event")
 
             for qid, q in quest_manager.hook_fuse():
                 print(f"  {BRIGHT_YELLOW}🎉 Quest #{qid} complete! {q['reward_desc']}!{RESET}")
@@ -2576,7 +2935,7 @@ try:
                     if ans.lower() != 'y': break
                 bug_round += 1
                 level = random.randint(bug_round * 3, bug_round * 3 + 10)
-                bwild, benemyhp, benemydm, benemytype, benemymoves, _, benemyspeed = get_wild_pokemon(level, location)
+                bwild, benemyhp, benemydm, benemytype, benemymoves, _, benemyspeed, _ = get_wild_pokemon(level, location)
                 benemyhp = int(benemyhp * 1.5)
                 benemydm = int(benemydm * 1.3)
                 glitch_name = glitch_text(bwild.upper())
@@ -3156,9 +3515,8 @@ try:
                 elif station_choice == "4":
                     break
 
-        exit_option = 21 if len(gym_badges_check) >= len(GYM_LEADERS) else 20
-        if option == exit_option:
-            break
+        # Exiting is handled by Save & Leave so late-game menus do not collide
+        # with feature options such as AI Chatbot and Elite Four.
 
         # ══════════════════════════════════════
         # OPTION 18: DUNGEON GAUNTLETS
@@ -3687,6 +4045,213 @@ try:
                             crazy_input("Press Enter to continue")
 
         # ══════════════════════════════════════
+        # OPTION 25: TM WORKSHOP / MOVE TUTOR
+        # ══════════════════════════════════════
+        if option == 25:
+            while True:
+                clear_screen()
+                fancy_header("TM WORKSHOP", emoji="🛠️", width=50)
+                print(f"  {BOLD}{BRIGHT_WHITE}Coins:{RESET} {money}")
+                print(f"  {DIM}Materials:{RESET} " + ", ".join(f"{k} x{v}" for k, v in sorted(inventory.items()) if k in ["TM Shard", "Battle Scrap", "Stardust", "Medicinal Herb"] or k.endswith(("Shard", "Pearl", "Resin", "Crystal", "Dust", "Plate", "Scale", "Cloth", "Fang", "Core", "Thread")))[:220])
+                print()
+                print(f"  {BOLD}{BRIGHT_GREEN}1.{RESET} Craft a TM")
+                print(f"  {BOLD}{BRIGHT_CYAN}2.{RESET} Teach a TM")
+                print(f"  {BOLD}{DIM}Q.{RESET} Back")
+                tm_opt = crazy_input("Choose").strip().lower()
+                if tm_opt == "q":
+                    break
+                if tm_opt == "1":
+                    recipe_names = list(TM_RECIPES.keys())
+                    for idx, move_name in enumerate(recipe_names, 1):
+                        recipe = TM_RECIPES[move_name]
+                        ing = ", ".join(f"{item} x{qty}" for item, qty in recipe["ingredients"].items())
+                        print(f"  {BOLD}{idx}.{RESET} {BRIGHT_YELLOW}{recipe['item']}{RESET} "
+                              f"{DIM}[{ing}; {recipe['coin_cost']} coins]{RESET}")
+                    print(f"  {BOLD}{len(recipe_names)+1}.{RESET} Back")
+                    choice = crazy_int_input("Craft which TM")
+                    if 1 <= choice <= len(recipe_names):
+                        move_name = recipe_names[choice - 1]
+                        ok, new_money, msg = craft_tm(inventory, move_name, money, trainer_base)
+                        if ok:
+                            money = new_money
+                            add_reputation(reputation, "Scientist", 6, trainer_base)
+                            notification_center.notify("TM Crafted", msg, "reward")
+                            print(f"  {BOLD}{BRIGHT_GREEN}✅ {msg}{RESET}")
+                        else:
+                            print(f"  {BOLD}{BRIGHT_RED}❌ {msg}{RESET}")
+                        crazy_input("Press Enter to continue")
+                elif tm_opt == "2":
+                    tm_items = [item for item in inventory if item.startswith("TM: ") and inventory.get(item, 0) > 0]
+                    if not tm_items:
+                        print(f"  {BOLD}{BRIGHT_RED}❌ No crafted TMs in your bag yet.{RESET}")
+                        crazy_input("Press Enter to continue")
+                        continue
+                    for idx, tm_item in enumerate(tm_items, 1):
+                        print(f"  {BOLD}{idx}.{RESET} {BRIGHT_CYAN}{tm_item}{RESET} x{inventory[tm_item]}")
+                    tm_choice = crazy_int_input("Choose TM")
+                    if not (1 <= tm_choice <= len(tm_items)):
+                        continue
+                    move_name = tm_items[tm_choice - 1].replace("TM: ", "", 1)
+                    print(f"  {BOLD}{BRIGHT_GREEN}Teach {move_name} to which Pokemon?{RESET}")
+                    for pn, st in pokemon.items():
+                        print(f"  - {pn} {DIM}Moves: {', '.join(st.get('moves', []))}{RESET}")
+                    target = crazy_input("Pokemon name")
+                    if target in pokemon:
+                        learned = offer_to_learn_move(pokemon[target], move_name)
+                        if learned:
+                            tm_item = f"TM: {move_name}"
+                            inventory[tm_item] -= 1
+                            if inventory[tm_item] <= 0:
+                                del inventory[tm_item]
+                            add_reputation(reputation, "Scientist", 4, trainer_base)
+                            print(f"  {BOLD}{BRIGHT_GREEN}✅ {target} learned {move_name}!{RESET}")
+                        else:
+                            print(f"  {DIM}TM was not consumed.{RESET}")
+                    else:
+                        print(f"  {BOLD}{BRIGHT_RED}❌ Pokemon not found.{RESET}")
+                    crazy_input("Press Enter to continue")
+
+        # ══════════════════════════════════════
+        # OPTION 26: SMART WHAT NOW
+        # ══════════════════════════════════════
+        if option == 26:
+            clear_screen()
+            fancy_header("WHAT NOW?", emoji="✅", width=50)
+            recommendations = get_what_now_recommendations(build_game_state(), limit=6)
+            for idx, rec in enumerate(recommendations, 1):
+                print(f"  {BOLD}{BRIGHT_GREEN}{idx}.{RESET} {rec}")
+            if not recommendations:
+                print(f"  {DIM}You are in great shape. Pick a goal and push it.{RESET}")
+            notification_center.notify("What Now", recommendations[0] if recommendations else "No urgent next step.", "tip")
+            crazy_input("Press Enter to continue")
+
+        # ══════════════════════════════════════
+        # OPTION 27: AI PROFESSOR COMPANION
+        # ══════════════════════════════════════
+        if option == 27:
+            clear_screen()
+            fancy_header("AI PROFESSOR COMPANION", emoji="🧪", width=55)
+            question = crazy_input("Ask the Professor anything, or press Enter for advice").strip()
+            for line in professor_advice(build_game_state(), question):
+                print(f"  {BRIGHT_CYAN}{line}{RESET}")
+            print()
+            print(f"  {DIM}Tip: this advisor reads team health, inventory, badges, base, reputation, and daily goals.{RESET}")
+            crazy_input("Press Enter to continue")
+
+        # ══════════════════════════════════════
+        # OPTION 28: TRAINER NPC ECOSYSTEM
+        # ══════════════════════════════════════
+        if option == 28:
+            clear_screen()
+            if not pokemon:
+                print(f"\n  {BOLD}{BRIGHT_RED}You need Pokemon first!{RESET}")
+                time.sleep(1)
+                continue
+            avg_lvl = int(sum(st.get("lvl", 1) for st in pokemon.values()) / max(1, len(pokemon)))
+            npc = generate_npc_trainer(avg_lvl, location)
+            fancy_header("TRAINER NETWORK", emoji="⚔️", width=55)
+            print(f"  {BOLD}{BRIGHT_RED}{npc['name']}{RESET} from {location}")
+            print(f"  {DIM}Persona: {npc['persona']} | Rematch profile generated from your current level.{RESET}")
+            enemy_team = {}
+            for mon in npc["team"]:
+                enemy_team[mon["name"]] = make_pokemon(mon["hp"], mon["dm"], mon["type"], mon["moves"], speed=mon["speed"], lvl=mon["lvl"], name=mon["name"])
+                print(f"  - {mon['name']} Lvl {mon['lvl']} {mon['type']} HP:{mon['hp']} DM:{mon['dm']}")
+            print()
+            ans = crazy_input("Battle this trainer? (y/n)")
+            if ans.lower() == "y":
+                context = {"mode": "Trainer Network", "inventory": inventory, "player_team": pokemon, "ai_persona": npc["persona"], "enemy_trainer_name": npc["name"]}
+                won, xp_dict, money_gained = run_team_battle(pokemon, enemy_team, get_random_weather(), context)
+                if won:
+                    reward = 300 + money_gained
+                    money += reward
+                    add_reputation(reputation, "Champion", 12, trainer_base)
+                    print(f"  {BOLD}{BRIGHT_GREEN}Trainer defeated! +{reward} coins{RESET}")
+                else:
+                    print(f"  {BOLD}{BRIGHT_RED}Trainer Network loss recorded. Heal and rematch later.{RESET}")
+                crazy_input("Press Enter to continue")
+
+        # ══════════════════════════════════════
+        # OPTION 29: CODEX-STYLE POKEDEX
+        # ══════════════════════════════════════
+        if option == 29:
+            clear_screen()
+            fancy_header("CODEX POKEDEX", emoji="📚", width=55)
+            all_names = sorted(set(pokedex_seen) | set(pokedex_caught) | set(pokemon.keys()))
+            if not all_names:
+                print(f"  {DIM}No research data yet.{RESET}")
+            for entry_name in all_names[:40]:
+                stats = pokemon.get(entry_name, {})
+                entry = build_codex_entry(entry_name, stats, entry_name in pokedex_caught, entry_name in pokedex_seen)
+                print(f"  {BOLD}{BRIGHT_CYAN}{entry['name'].capitalize()}{RESET} [{entry['status']}] "
+                      f"{DIM}Type:{entry['type']} Trait:{entry['personality']} Bond:{entry['bond']} Best Grade:{entry['best_catch_grade']}{RESET}")
+                print(f"    {DIM}{entry['note']}{RESET}")
+            if len(all_names) > 40:
+                print(f"  {DIM}...and {len(all_names) - 40} more entries.{RESET}")
+            crazy_input("Press Enter to continue")
+
+        # ══════════════════════════════════════
+        # OPTION 30: TRAINER BASE BUILDER
+        # ══════════════════════════════════════
+        if option == 30:
+            while True:
+                clear_screen()
+                fancy_header("TRAINER BASE", emoji="🏠", width=55)
+                print(f"  {BOLD}{BRIGHT_WHITE}Coins:{RESET} {money}  {DIM}Title: {reputation_title(reputation)}{RESET}")
+                print()
+                room_names = list(BASE_ROOMS.keys())
+                for idx, room in enumerate(room_names, 1):
+                    level = trainer_base.get("rooms", {}).get(room, 0)
+                    cost = BASE_ROOMS[room]["cost"]
+                    mats = ", ".join(f"{item} x{qty * (level + 1)}" for item, qty in cost["materials"].items())
+                    print(f"  {BOLD}{idx}.{RESET} {BRIGHT_CYAN}{room}{RESET} Lv {level} - {BASE_ROOMS[room]['desc']}")
+                    print(f"     {DIM}Next: {cost['coins'] * (level + 1)} coins; {mats}{RESET}")
+                print(f"  {BOLD}{len(room_names)+1}.{RESET} Back")
+                choice = crazy_int_input("Upgrade which room")
+                if choice == len(room_names) + 1:
+                    break
+                if 1 <= choice <= len(room_names):
+                    room = room_names[choice - 1]
+                    ok, new_money, msg = upgrade_room(trainer_base, inventory, money, room)
+                    if ok:
+                        money = new_money
+                        add_reputation(reputation, "Scientist", 5, trainer_base)
+                        notification_center.notify("Base Upgrade", msg, "reward")
+                        print(f"  {BOLD}{BRIGHT_GREEN}✅ {msg}{RESET}")
+                    else:
+                        print(f"  {BOLD}{BRIGHT_RED}❌ {msg}{RESET}")
+                    crazy_input("Press Enter to continue")
+
+        # ══════════════════════════════════════
+        # OPTION 31: REPUTATION + FACTIONS
+        # ══════════════════════════════════════
+        if option == 31:
+            clear_screen()
+            fancy_header("REPUTATION & FACTIONS", emoji="🏛️", width=55)
+            print(f"  {BOLD}{BRIGHT_YELLOW}Current Title: {reputation_title(reputation)}{RESET}")
+            print()
+            for faction, desc in FACTIONS.items():
+                print(f"  {BOLD}{BRIGHT_CYAN}{faction:15}{RESET} {reputation.get(faction, 0):4} pts  {DIM}{desc}{RESET}")
+            print()
+            print(f"  {DIM}Reputation grows automatically from catches, battles, crafting, fusions, raids, breeding, and base upgrades.{RESET}")
+            crazy_input("Press Enter to continue")
+
+        # ══════════════════════════════════════
+        # OPTION 32: SEASONAL EVENT FRAMEWORK
+        # ══════════════════════════════════════
+        if option == 32:
+            clear_screen()
+            fancy_header("SEASONAL EVENTS", emoji="🌌", width=55)
+            events = get_active_seasonal_events()
+            if not events:
+                print(f"  {DIM}No major seasonal event is active today. Minor world notifications still run every 5 seconds.{RESET}")
+            for event in events:
+                print(f"  {BOLD}{BRIGHT_MAGENTA}{event['name']}{RESET}")
+                print(f"    {event['desc']}")
+                print(f"    {BRIGHT_GREEN}{event['bonus']}{RESET}")
+                notification_center.notify(event["name"], event["bonus"], "event")
+            crazy_input("Press Enter to continue")
+
+        # ══════════════════════════════════════
         # OPTION 22: SAVE & LEAVE
         # ══════════════════════════════════════
         if option == 22:
@@ -3694,7 +4259,7 @@ try:
             if cloud_token:
                 try:
                     print(f"  {DIM}☁️  Saving to cloud...{RESET}")
-                    save_data = json.dumps({"name": name, "pokemon": pokemon, "money": money, "pvp_rp": pvp_rp, "trophies": trophies, "inventory": inventory, "location": location, "badges": badges, "tower_record": tower_record, "pokedex_seen": list(pokedex_seen), "pokedex_caught": list(pokedex_caught), "elite_four_defeated": elite_four_defeated, "achievements": achievement_manager.to_dict(), "heal_tickets": heal_tickets, "daycare": daycare})
+                    save_data = json.dumps(build_save_payload())
                     r = robust_request("POST", f"{SERVER_URL}/save", json_data={"save_data": save_data}, headers={"Authorization": f"Bearer {cloud_token}"}, timeout=30)
                     if r.status_code == 200:
                         print(f"  {BRIGHT_GREEN}✅ Game saved to cloud!{RESET}")
@@ -3717,7 +4282,7 @@ except Exception as e:
     if cloud_token:
         try:
             print(f"  {DIM}☁️  Emergency cloud save...{RESET}")
-            save_data = json.dumps({"name": name, "pokemon": pokemon, "money": money, "pvp_rp": pvp_rp, "trophies": trophies, "inventory": inventory, "location": location, "badges": badges, "tower_record": tower_record, "pokedex_seen": list(pokedex_seen), "pokedex_caught": list(pokedex_caught), "elite_four_defeated": elite_four_defeated, "achievements": achievement_manager.to_dict(), "heal_tickets": heal_tickets, "daycare": daycare})
+            save_data = json.dumps(build_save_payload())
             r = robust_request("POST", f"{SERVER_URL}/save", json_data={"save_data": save_data}, headers={"Authorization": f"Bearer {cloud_token}"}, timeout=30)
             if r.status_code == 200:
                 print(f"  {BRIGHT_GREEN}✅ Emergency cloud save successful!{RESET}")
@@ -3733,7 +4298,7 @@ except Exception as e:
 if cloud_token:
     try:
         print(f"  {DIM}☁️  Auto-saving to cloud...{RESET}")
-        save_data = json.dumps({"name": name, "pokemon": pokemon, "money": money, "pvp_rp": pvp_rp, "trophies": trophies, "inventory": inventory, "location": location, "badges": badges, "tower_record": tower_record, "pokedex_seen": list(pokedex_seen), "pokedex_caught": list(pokedex_caught), "elite_four_defeated": elite_four_defeated, "achievements": achievement_manager.to_dict(), "heal_tickets": heal_tickets, "daycare": daycare})
+        save_data = json.dumps(build_save_payload())
         r = robust_request("POST", f"{SERVER_URL}/save", json_data={"save_data": save_data}, headers={"Authorization": f"Bearer {cloud_token}"}, timeout=30)
         if r.status_code == 200:
             print(f"  {BRIGHT_GREEN}✅ Cloud save updated!{RESET}")
